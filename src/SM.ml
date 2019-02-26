@@ -1,5 +1,5 @@
 open GT       
-       
+open Syntax     
 (* The type for the stack machine instructions *)
 @type insn =
 (* binary operator                 *) | BINOP of string
@@ -58,14 +58,13 @@ let run i p = let (_, (_, _, o)) = eval ([], (Syntax.Expr.empty, i, [])) p in o
    Takes a program in the source language and returns an equivalent program for the
    stack machine
  *)
-
-let rec compile stmt = match stmt with
-    | Read    x       -> [READ; ST x]
-    | Write   e       -> (compile_expr e)@[WRITE]
-    | Assign (x, e)   -> (compile_expr e)@[ST x]
-    | Seq    (s1, s2) -> (compile s1)@(compile s2)
-    and compile_expr e = match e with
+let rec compile_expr e = match e with
         | Expr.Const  n         -> [CONST n]
         | Expr.Var    x         -> [LD x]
-        | Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op] 
+        | Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op]
 
+let rec compile st = match st with
+    | Stmt.Read    x       -> [READ; ST x]
+    | Stmt.Write   e       -> (compile_expr e)@[WRITE]
+    | Stmt.Assign (x, e)   -> (compile_expr e)@[ST x]
+    | Stmt.Seq    (s1, s2) -> (compile s1)@(compile s2)
