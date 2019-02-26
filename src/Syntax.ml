@@ -33,7 +33,7 @@ module Expr =
       to value v and returns the new state.
     *)
     let update x v s = fun y -> if x = y then v else s y
-
+    let s = update "x" 1 @@ update "y" 2 @@ update "z" 3 @@ update "t" 4 empty
     (* Expression evaluator
 
           val eval : state -> t -> int
@@ -41,7 +41,30 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
-    let eval _ = failwith "Not implemented yet"
+    let of_int i = if i == 0 then false else true
+    let to_int b = if b then 1 else 0
+    let rec eval s e =
+        match e with
+        | Const x -> x
+        | Var x -> s x
+        | Binop (op, x, y) ->
+            let l = eval s x in
+            let r = eval s y in 
+            match op with
+            | "+" -> l + r
+            | "-" -> l - r
+            | "*" -> l * r
+            | "/" -> l / r
+            | "%" -> l mod r
+            | "!!" -> to_int(of_int(l) || of_int(r))
+            | "&&" -> to_int(of_int(l) && of_int(r))
+            | "==" -> to_int(l == r)
+            | "!=" -> to_int(l != r)
+            | "<" -> to_int(l < r)
+            | "<=" -> to_int(l <= r)
+            | ">" -> to_int(l > r)
+            | ">=" -> to_int(l >= r)
+            | _ -> failwith(Printf.sprintf "Undefined expression")
 
   end
                     
@@ -65,7 +88,15 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ = failwith "Not implemented yet"
+    let rec eval cfg st: config =
+        let (s, i, o) = cfg in
+        match st with
+        | Read x -> (match i with
+            | h :: rest -> (Expr.update x h s, rest, o)
+            | _           -> failwith "Empty input")
+        | Write   e             -> (s, i, o @ [Expr.eval s e])
+        | Assign (x, e)         -> (Expr.update x (Expr.eval s e) s, i, o)
+        | Seq    (s1, s2) -> eval (eval cfg s1) s2
                                                          
   end
 
