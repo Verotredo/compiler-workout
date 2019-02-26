@@ -33,7 +33,6 @@ module Expr =
       to value v and returns the new state.
     *)
     let update x v s = fun y -> if x = y then v else s y
-    let s = update "x" 1 @@ update "y" 2 @@ update "z" 3 @@ update "t" 4 empty
     (* Expression evaluator
 
           val eval : state -> t -> int

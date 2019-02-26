@@ -29,7 +29,7 @@ let rec eval cfg prog = List.fold_left eval_instr cfg prog
     let (s, i, o)    = cfg in
     match instr with
         | BINOP op -> (match stack with
-            | x::y::stack_rest -> ((Expr.eval_op op y x)::stack_rest, cfg)
+            | x::y::stack_rest -> ((Expr.eval op y x)::stack_rest, cfg)
             | _                ->  failwith "Stack is empty on binop")
         | CONST n -> (n::stack, cfg)
         | READ    -> (match i with
