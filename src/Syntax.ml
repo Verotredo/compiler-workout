@@ -92,7 +92,7 @@ module Stmt =
         match st with
         | Read    x       -> (Expr.update x (List.hd i) s, List.tl i, o)
         | Write   e       -> (s, i, o @ [Expr.eval s e])
-        | Assign (v, e)   -> (Expr.update v (Expr.eval s e) cfg)
+        | Assign (v, e)   -> (Expr.update v (Expr.eval s e) s, i, o)
         | Seq    (e1, e2) ->
             let stmt = eval cfg e1
             in eval stmt e2
