@@ -87,15 +87,15 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let rec eval cfg st: config =
+    let rec eval cfg st =
         let (s, i, o) = cfg in
         match st with
-        | Read x -> (match i with
-            | h :: rest -> (Expr.update x h s, rest, o)
-            | _           -> failwith "Empty input")
-        | Write   e             -> (s, i, o @ [Expr.eval s e])
-        | Assign (x, e)         -> (Expr.update x (Expr.eval s e) s, i, o)
-        | Seq    (s1, s2) -> eval (eval cfg s1) s2
+        | Read    x       -> (Expr.update x (List.hd i) s, List.tl i, o)
+        | Write   e       -> (s, i, o @ [Expr.eval s e])
+        | Assign (v, e)   -> (Expr.update v (Expr.eval s e) cfg)
+        | Seq    (e1, e2) ->
+            let stmt = eval cfg e1
+            in eval stmt e2
                                                          
   end
 

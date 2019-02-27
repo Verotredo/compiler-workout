@@ -24,23 +24,18 @@ type config = int list * Syntax.Stmt.config
    Takes a configuration and a program, and returns a configuration as a result
  *)                        
 let rec eval st_cfg prog  =
-    let (stack, cfg) = st_cfg in
+    let (st, cfg) = st_cfg in
     let (s, i, o)    = cfg in
     match prog with
-        | BINOP op -> (match stack with
-            | x::y::stack_rest -> ((Expr.eval s (Binop (op, Const x, Const y)))::stack_rest, cfg)
-            | _                ->  failwith "Stack is empty on binop")
-        | CONST n -> (n::stack, cfg)
-        | READ    -> (match i with
-            | h::rest        -> (h::stack, (s, rest, o))
-            | _                -> failwith "Unexpected end of input")
-        | WRITE -> (match stack with
-            | sh::stack_rest    -> (stack_rest, (s, i, o @ [sh]))
-            | _                -> failwith "Stack is empty on write")
-        | LD x -> ((s x)::stack, cfg)
-        | ST x -> (match stack with
-            | sh::stack_rest    -> (stack_rest, (Expr.update x sh s, i, o))
-            | _                -> failwith "Stack is empty on store")  
+        | BINOP op :: p ->
+            let y :: x :: st1 = st in
+            let res = Expr.eval s (Binop (op, Const x, Const y))
+            in eval (res :: st1, cfg) p
+        | CONST c  :: p -> eval (c :: st, cfg) p
+        | READ     :: p -> eval ((List.hd i) :: st, (s, List.tl i, o)) p
+        | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
+        | LD x     :: p -> eval (s x :: st, cfg) p
+        | ST x     :: p -> eval (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
 
     
 (* Top-level evaluation
