@@ -55,12 +55,12 @@ let run p i = let (_, (_, _, o)) = eval ([], (Language.Expr.empty, i, [])) p in 
  *)
 
 let rec compile_expr e = match e with
-        | Syntax.Expr.Const  n         -> [CONST n]
-        | Syntax.Expr.Var    x         -> [LD x]
-        | Syntax.Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op]
+        | Language.Expr.Const  n         -> [CONST n]
+        | Language.Expr.Var    x         -> [LD x]
+        | Language.Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op]
 
 let rec compile st = match st with
-    | Syntax.Stmt.Read    x       -> [READ; ST x]
-    | Syntax.Stmt.Write   e       -> (compile_expr e)@[WRITE]
-    | Syntax.Stmt.Assign (x, e)   -> (compile_expr e)@[ST x]
-    | Syntax.Stmt.Seq    (s1, s2) -> (compile s1)@(compile s2)
+    | Language.Stmt.Read    x       -> [READ; ST x]
+    | Language.Stmt.Write   e       -> (compile_expr e)@[WRITE]
+    | Language.Stmt.Assign (x, e)   -> (compile_expr e)@[ST x]
+    | Language.Stmt.Seq    (s1, s2) -> (compile s1)@(compile s2)
