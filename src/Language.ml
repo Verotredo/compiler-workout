@@ -68,6 +68,7 @@ module Expr =
             | ">=" -> to_int(l >= r)
             | _ -> failwith(Printf.sprintf "Undefined expression")
 
+    let parseBinop op = ostap(- $(op), (fun x y -> Binop (op, x, y))
     (* Expression parser. You can use the following terminals:
 
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
@@ -75,7 +76,21 @@ module Expr =
    
     *)
     ostap (
-      parse: empty {failwith "Not implemented yet"}
+      expr:
+        !(Ostap.Util.expr
+            (fun x -> x)
+            (Array.map (fun (assoc, ops) -> assoc, List.map parseBinop ops)
+                [|
+                  `Lefta, ["!!"];
+                  `Lefta, ["&&"];
+                  `Nona , ["<="; "<"; ">="; ">"; "=="; "!="];
+                  `Lefta, ["+"; "-"];
+                  `Lefta, ["*"; "/"; "%"];
+                |]
+             )
+            primary
+        );
+        primary: c: DECIMAL {Const c} | x: IDENT {Var x} | -"(" expr -")"
     )
 
   end
@@ -126,3 +141,12 @@ type t = Stmt.t
 *)
 let eval p i =
   let _, _, o = Stmt.eval (Expr.empty, i, []) p in o
+
+ostap (
+      stmt:
+          x:IDENT ":=" e:!(Expr.expr)    {Assign (x, e)}
+        | "write" "(" e:!(Expr.expr) ")" {Write e}
+        | "read" "(" x:IDENT ")"         {Read x} ;
+
+       parse: s:stmt";" rest:parse {Seq (s, rest)} | stmt
+    )	    
