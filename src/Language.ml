@@ -125,14 +125,17 @@ module Stmt =
         | Seq    (e1, e2) ->
             let stmt = eval cfg e1
             in eval stmt e2
+    
+    (* Statement parser *)        
     ostap (
       stmt:
           x:IDENT ":=" e:!(Expr.expr)    {Assign (x, e)}
         | "write" "(" e:!(Expr.expr) ")" {Write e}
         | "read" "(" x:IDENT ")"         {Read x} ;
 
-       parse: s:stmt";" rest:parse {Seq (s, rest)} | stmt
+       parse: s:stmt ";" rest:parse {Seq (s, rest)} | stmt
     )	                                                       
+ 
  end
 
 (* The top-level definitions *)
