@@ -68,7 +68,7 @@ module Expr =
             | ">=" -> to_int(l >= r)
             | _ -> failwith(Printf.sprintf "Undefined expression")
 
-    let parseBinop op = ostap(- $(op), (fun x y -> Binop (op, x, y))
+    let parseBinop op = ostap(- $(op)), (fun x y -> Binop (op, x, y))
     (* Expression parser. You can use the following terminals:
 
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
