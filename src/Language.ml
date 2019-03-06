@@ -125,7 +125,14 @@ module Stmt =
         | Seq    (e1, e2) ->
             let stmt = eval cfg e1
             in eval stmt e2
-                                                         
+    ostap (
+      stmt:
+          x:IDENT ":=" e:!(Expr.expr)    {Assign (x, e)}
+        | "write" "(" e:!(Expr.expr) ")" {Write e}
+        | "read" "(" x:IDENT ")"         {Read x} ;
+
+       parse: s:stmt";" rest:parse {Seq (s, rest)} | stmt
+    )	                                                       
  end
 
 (* The top-level definitions *)
@@ -142,11 +149,4 @@ type t = Stmt.t
 let eval p i =
   let _, _, o = Stmt.eval (Expr.empty, i, []) p in o
 
-ostap (
-      stmt:
-          x:IDENT ":=" e:!(Expr.expr)    {Assign (x, e)}
-        | "write" "(" e:!(Expr.expr) ")" {Write e}
-        | "read" "(" x:IDENT ")"         {Read x} ;
-
-       parse: s:stmt";" rest:parse {Seq (s, rest)} | stmt
-    )	    
+  
