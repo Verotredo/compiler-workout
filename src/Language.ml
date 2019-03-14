@@ -73,7 +73,7 @@ module Expr =
 
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
          DECIMAL --- a decimal constant [0-9]+ as a string
-   
+                                                                                                                  
     *)
     ostap (
       expr:
@@ -92,7 +92,7 @@ module Expr =
         );
         primary: c: DECIMAL {Const c} | x: IDENT {Var x} | -"(" expr -")"
     )
-
+    
   end
                     
 (* Simple statements: syntax and sematics *)
@@ -111,7 +111,7 @@ module Stmt =
 
     (* Statement evaluator
 
-          val eval : config -> t -> config
+         val eval : config -> t -> config
 
        Takes a configuration and a statement, and returns another configuration
     *)
@@ -136,7 +136,6 @@ module Stmt =
        parse: s:stmt ";" rest:parse {Seq (s, rest)} | stmt
     )	                                                       
  
- end
 
 (* The top-level definitions *)
 
@@ -152,4 +151,6 @@ type t = Stmt.t
 let eval p i =
   let _, _, o = Stmt.eval (Expr.empty, i, []) p in o
 
-  
+
+(* Top-level parser *)
+let parse = Stmt.parse                                                     

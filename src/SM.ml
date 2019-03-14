@@ -36,7 +36,6 @@ let rec eval (st, (s, i, o)) prog =
     | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
     | LD x     :: p -> eval (s x :: st, (s, i, o)) p
     | ST x     :: p -> eval (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
-
     
 (* Top-level evaluation
 
@@ -44,7 +43,7 @@ let rec eval (st, (s, i, o)) prog =
 
    Takes a program, an input stream, and returns an output stream this program calculates
 *)
-let run p i = let (_, (_, _, o)) = eval ([], (Language.Expr.empty, i, [])) p in o
+let run p i = let (_, (_, _, o)) = eval ([], (Expr.empty, i, [])) p in o
 
 (* Stack machine compiler
 
