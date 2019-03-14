@@ -135,7 +135,7 @@ module Stmt =
 
        parse: s:stmt ";" rest:parse {Seq (s, rest)} | stmt
     )	                                                       
- 
+ end
 
 (* The top-level definitions *)
 
