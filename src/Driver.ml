@@ -6,8 +6,21 @@ let parse infile =
     (object
        inherit Matcher.t s
        inherit Util.Lexers.decimal s
-       inherit Util.Lexers.ident ["read"; "write"; "skip"; (* some other keywords *)] s
-      inherit Util.Lexers.skip [
+       inherit Util.Lexers.ident ["read";
+                                  "write";
+                                  "skip";
+                                  "if";
+                                  "then";
+                                  "elif";
+                                  "else";
+                                  "fi";
+                                  "while";
+                                  "do";
+                                  "od";
+                                  "repeat";
+                                  "until";
+                                  "for"] s
+       inherit Util.Lexers.skip [
 	 Matcher.Skip.whitespaces " \t\n";
 	 Matcher.Skip.lineComment "--";
 	 Matcher.Skip.nestedComment "(*" "*)"
@@ -43,7 +56,6 @@ let main =
 	  else SM.run (SM.compile prog) input
 	in
 	List.iter (fun i -> Printf.printf "%d\n" i) output
-    | `Fail er -> Printf.printf "Syntax error: %s\n" er
-
+    | `Fail er -> Printf.eprintf "Syntax error: %s\n" er
   with Invalid_argument _ ->
     Printf.printf "Usage: rc [-i | -s] <input file.expr>\n"
