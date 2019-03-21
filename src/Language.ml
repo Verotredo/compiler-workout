@@ -93,7 +93,7 @@ module Expr =
             primary
         );
         primary: c: DECIMAL {Const c} | x: IDENT {Var x} | -"(" expr -")"
-
+    )
   end
                     
 (* Simple statements: syntax and sematics *)
