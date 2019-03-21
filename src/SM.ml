@@ -32,11 +32,10 @@ let rec eval env scfg prog =
     let (s, i, o) = cfg in
   match prog with
   | [] -> scfg
-  | BINOP(op) :: rest ->
-    (match st with
-     | x :: y :: tail ->
-       eval env ((Language.Expr.parseBinop op y x) :: tail, cfg) rest
-     | _ -> failwith "Empty stack")
+  | BINOP op :: rest ->
+        let y :: x :: st1 = st in
+        let res = Expr.eval s (Binop (op, Const x, Const y))
+        in eval (res :: st1, (s, i, o)) rest
   | CONST(value) :: rest -> eval env (value :: st, cfg) rest
   | READ :: rest ->
     (match i with
