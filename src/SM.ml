@@ -33,29 +33,29 @@ let rec eval env scfg prog =
   match prog with
   | [] -> scfg
   | BINOP(op) :: rest ->
-    (match stack with
+    (match st with
      | rhs :: lhs :: tail ->
        eval env ((Language.Expr.evalBinop op lhs rhs) :: tail, cfg) rest
      | _ -> failwith "Empty stack")
-  | CONST(value) :: rest -> eval env (value :: stack, cfg) rest
+  | CONST(value) :: rest -> eval env (value :: st, cfg) rest
   | READ :: rest ->
-    (match input with
-     | head :: tail -> eval env (head :: stack, (state, tail, output)) rest
+    (match i with
+     | head :: tail -> eval env (head :: st, (s, tail, o)) rest
      | [] -> failwith "Empty stack")
   | WRITE :: rest -> 
-    (match stack with
-     | head :: tail -> eval env (tail, (state, input, output @ [head])) rest
+    (match st with
+     | head :: tail -> eval env (tail, (s, i, o @ [head])) rest
      | [] -> failwith "Empty stack")
-  | LD(var) :: rest -> eval env ((state var) :: stack, cfg) rest
+  | LD(var) :: rest -> eval env ((s var) :: st, cfg) rest
   | ST(var) :: rest ->
-    (match stack with
+    (match st with
      | head :: tail ->
-       eval env (tail, (Language.Expr.update var head state, input, output)) rest
+       eval env (tail, (Language.Expr.update var head s, i, o)) rest
      | [] -> failwith "Empty stack")
   | LABEL(_) :: rest -> eval env scfg rest
   | JMP(l) :: rest -> eval env scfg (env#labeled l)
   | CJMP(jumpOnZero, l) :: rest ->
-    (match stack with
+    (match st with
      | head :: tail -> if (Expr.bool_from_int head) != jumpOnZero
                        then eval env scfg (env#labeled l)
                        else eval env scfg rest
