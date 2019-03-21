@@ -78,6 +78,7 @@ module Expr =
                                                                                                                   
     *)
     ostap (
+      parse: expr;
       expr:
         !(Ostap.Util.expr
             (fun x -> x)
@@ -131,20 +132,20 @@ module Stmt =
       | While (e, s) ->
         if Expr.eval st e != 0 then eval (eval cfg s) stmt else cfg
       | RepeatUntil (e, s) ->
-        let ((stm, _, _) as cfgm) = eval cfg s in
-        if Expr.eval stm e = 0 then eval cfgm stmt else cfgm
+        let ((st', _, _) as cfg') = eval cfg s in
+        if Expr.eval st' e = 0 then eval cfg' stmt else cfg'
     (* Statement parser *)        
     ostap (
       parse  : seq | stmt;
       stmt   : read | write | assign | skip | if' | while' | for' | repeat;
       read   : %"read" -"(" x:IDENT -")" { Read x };
-      write  : %"write" -"(" e:!(Expr.parseBinop ) -")" { Write e };
-      assign : x:IDENT -":=" e:!(Expr.parseBinop ) { Assign (x, e) };
+      write  : %"write" -"(" e:!(Expr.parse) -")" { Write e };
+      assign : x:IDENT -":=" e:!(Expr.parse) { Assign (x, e) };
       seq    : s1:stmt -";" s2:parse { Seq(s1, s2) };
       skip   : %"skip" { Skip };
-      if'    : %"if" e:!(Expr.parseBinop )
+      if'    : %"if" e:!(Expr.parse)
                %"then" s1:parse
-                 elifs :(%"elif" !(Expr.parseBinop ) %"then" parse )*
+                 elifs :(%"elif" !(Expr.parse) %"then" parse)*
                  else' :(%"else" parse)? %"fi"
                    {
                      let else'' = match else' with
@@ -154,9 +155,9 @@ module Stmt =
                      let else''' = List.fold_right (fun (e', t') t -> If (e', t', t)) elifs else'' in
                      If (e, s1, else''')
                    };
-      while' : %"while" e:!(Expr.parseBinop ) %"do" s:parse %"od" { While (e, s) };
-      for'   : %"for" s1:parse "," e:!(Expr.parseBinop ) "," s2:parse %"do" s3:parse %"od" { Seq (s1, While (e, Seq (s3, s2))) };
-      repeat : %"repeat" s:parse %"until" e:!(Expr.parseBinop ) { RepeatUntil (e, s) }
+      while' : %"while" e:!(Expr.parse) %"do" s:parse %"od" { While (e, s) };
+      for'   : %"for" s1:parse "," e:!(Expr.parse) "," s2:parse %"do" s3:parse %"od" { Seq (s1, While (e, Seq (s3, s2))) };
+      repeat : %"repeat" s:parse %"until" e:!(Expr.parse) { RepeatUntil (e, s) }
     )	                                                        
  end
 
