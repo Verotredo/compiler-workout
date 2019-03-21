@@ -1,130 +1,243 @@
-open GT       
-open Language
-       
-(* The type for the stack machine instructions *)
-@type insn =
-(* binary operator                 *) | BINOP of string
-(* put a constant on the stack     *) | CONST of int                 
-(* read to stack                   *) | READ
-(* write from stack                *) | WRITE
-(* load a variable to the stack    *) | LD    of string
-(* store a variable from the stack *) | ST    of string
-(* a label                         *) | LABEL of string
-(* unconditional jump              *) | JMP   of string                                                                                                                
-(* conditional jump                *) | CJMP  of string * string with show
-                                                   
-(* The type for the stack machine program *)                                                               
-type prg = insn list
+(* X86 codegeneration interface *)
 
-(* The type for the stack machine configuration: a stack and a configuration from statement
-   interpreter
- *)
-type config = int list * Stmt.config
+(* The registers: *)
+let regs = [|"%ebx"; "%ecx"; "%esi"; "%edi"; "%eax"; "%edx"; "%ebp"; "%esp"|]
 
-(* Stack machine interpreter
-     val eval : env -> config -> prg -> config
-   Takes an environment, a configuration and a program, and returns a configuration as a result. The
-   environment is used to locate a label to jump to (via method env#labeled <label_name>)
-*)                         
-let hd_tl = Language.Stmt.hd_tl
-let cjmp_sat znz value = if (znz = "nz" && value <> 0) || (znz = "z" && value == 0) then true else false
-let rec eval env (st, (s, i, o)) p = if 1 == 0 then (st, (s, i, o)) else
-    let eval_expr expr = match expr with
-        | BINOP op -> (match st with
-            | (y::x::xs) -> (Language.Expr.str_to_op op x y :: xs, (s, i, o)) 
-            | _ -> failwith "Stack is empty on binop")
-        | CONST x -> (x :: st, (s, i, o))
-        | READ -> let (head, tail) = hd_tl i "Unexpected end of input" in
-                      (head :: st, (s, tail, o))
-        | WRITE -> let (head, tail) = hd_tl st "Stack is empty on write" in
-                       (tail, (s, i, o @ [head]))
-        | LD name -> (s name :: st, (s, i, o))
-        | ST name -> let (head, tail) = hd_tl st "Stack is empty on store" in
-                     let new_state = Language.Expr.update name head s in
-                     (tail, (new_state, i, o))
-        | LABEL _ -> (st, (s, i, o))
-        | _ -> failwith "impossible"
-    in match p with
-        | x::xs -> (match x with 
-            | JMP label -> eval env (st, (s, i, o)) (env#labeled label)
-            | CJMP (znz, label) -> let (head, tail) = hd_tl st "Stack is empty on cjmp" in
-                if cjmp_sat znz head
-                then eval env (tail, (s, i, o)) (env#labeled label)
-                else eval env (tail, (s, i, o)) xs
-            | _ -> eval env (eval_expr x) xs)
-        | _ -> (st, (s, i, o))
+(* We can not freely operate with all register; only 3 by now *)                    
+let num_of_regs = Array.length regs - 5
 
-(* Top-level evaluation
-     val run : prg -> int list -> int list
-   Takes a program, an input stream, and returns an output stream this program calculates
-*)
-let run p i =
-  let module M = Map.Make (String) in
-  let rec make_map m = function
-  | []              -> m
-  | (LABEL l) :: tl -> make_map (M.add l tl m) tl
-  | _ :: tl         -> make_map m tl
+(* We need to know the word size to calculate offsets correctly *)
+let word_size = 4
+
+(* We need to distinguish the following operand types: *)
+type opnd = 
+| R of int     (* hard register                    *)
+| S of int     (* a position on the hardware stack *)
+| M of string  (* a named memory location          *)
+| L of int     (* an immediate operand             *)
+
+(* For convenience we define the following synonyms for the registers: *)         
+let ebx = R 0
+let ecx = R 1
+let esi = R 2
+let edi = R 3
+let eax = R 4
+let edx = R 5
+let ebp = R 6
+let esp = R 7
+
+(* Now x86 instruction (we do not need all of them): *)
+type instr =
+(* copies a value from the first to the second operand  *) | Mov   of opnd * opnd
+(* makes a binary operation; note, the first operand    *) | Binop of string * opnd * opnd
+(* designates x86 operator, not the source language one *)
+(* x86 integer division, see instruction set reference  *) | IDiv  of opnd
+(* see instruction set reference                        *) | Cltd
+(* sets a value from flags; the first operand is the    *) | Set   of string * string
+(* suffix, which determines the value being set, the    *)                     
+(* the second --- (sub)register name                    *)
+(* pushes the operand on the hardware stack             *) | Push  of opnd
+(* pops from the hardware stack to the operand          *) | Pop   of opnd
+(* call a function by a name                            *) | Call  of string
+(* returns from a function                              *) | Ret
+(* a label in the code                                  *) | Label of string
+(* a conditional jump                                   *) | CJmp  of string * string
+(* a non-conditional jump                               *) | Jmp   of string
+
+(* Instruction printer *)
+let show instr =
+  let binop = function
+  | "+"   -> "addl"
+  | "-"   -> "subl"
+  | "*"   -> "imull"
+  | "&&"  -> "andl"
+  | "!!"  -> "orl" 
+  | "^"   -> "xorl"
+  | "cmp" -> "cmpl"
+  | _     -> failwith "unknown binary operator"
   in
-  let m = make_map M.empty p in
-  if (1 == 0) then
-  List.fold_left (fun () pr ->
-                  Printf.printf "%s\n" (GT.transform(insn) (new @insn[show]) () pr)) () p
-  else ();
-  let (_, (_, _, o)) = eval (object method labeled l = M.find l m end) ([], (Expr.empty, i, [])) p in o
-(* Stack machine compiler
-     val compile : Language.Stmt.t -> prg
-   Takes a program in the source language and returns an equivalent program for the
-   stack machine
+  let opnd = function
+  | R i -> regs.(i)
+  | S i -> Printf.sprintf "-%d(%%ebp)" ((i+1) * word_size)
+  | M x -> x
+  | L i -> Printf.sprintf "$%d" i
+  in
+  match instr with
+  | Cltd               -> "\tcltd"
+  | Set   (suf, s)     -> Printf.sprintf "\tset%s\t%s"     suf s
+  | IDiv   s1          -> Printf.sprintf "\tidivl\t%s"     (opnd s1)
+  | Binop (op, s1, s2) -> Printf.sprintf "\t%s\t%s,\t%s"   (binop op) (opnd s1) (opnd s2)
+  | Mov   (s1, s2)     -> Printf.sprintf "\tmovl\t%s,\t%s" (opnd s1) (opnd s2)
+  | Push   s           -> Printf.sprintf "\tpushl\t%s"     (opnd s)
+  | Pop    s           -> Printf.sprintf "\tpopl\t%s"      (opnd s)
+  | Ret                -> "\tret"
+  | Call   p           -> Printf.sprintf "\tcall\t%s" p
+  | Label  l           -> Printf.sprintf "%s:\n" l
+  | Jmp    l           -> Printf.sprintf "\tjmp\t%s" l
+  | CJmp  (s , l)      -> Printf.sprintf "\tj%s\t%s" s l
+
+(* Opening stack machine to use instructions without fully qualified names *)
+open SM
+
+(* Symbolic stack machine evaluator
+     compile : env -> prg -> env * instr list
+   Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
+   of x86 instructions
 *)
-class labels =
+
+let mov_mem_mem x y = 
+    match x with
+        | R _ -> [Mov (x, y)]
+        | L _ -> [Mov (x, y)]
+        | _ -> match x with
+            | R _ -> [Mov (x, y)]
+            | _ -> [Mov (x, eax); Mov (eax, y)]
+
+let suffix_for_comparing op = match op with
+    | "==" -> "e"
+    | "!=" -> "ne"
+    | ">" -> "g"
+    | ">=" -> "ge"
+    | "<" -> "l"
+    | "<=" -> "le"
+    | _ -> failwith "not cmp operation"
+
+let op_is_cmp op = op = "==" || op = "!=" || op = "<" || op = "<=" || 
+                   op = ">" || op = ">="
+
+let binop_mem_mem op x y = 
+    match x with
+        | R _ | L _ -> y, [op x y]
+        | _ -> match x with
+            | R _ -> y, [op x y]
+            | _ -> edx, [Mov (y, edx); op x edx]
+
+let compile_binop env op =
+    let lhs,rhs,env = env#pop2 in
+    let a,env = env#allocate in
+    env,
+    if op = "+" || op = "-" || op = "*" then
+        let res, code = binop_mem_mem (fun x y -> Binop (op, x, y)) lhs rhs in
+        code @ [Mov(res, a)]
+    else if op_is_cmp op then
+        let suff = suffix_for_comparing op in
+        let _,code = binop_mem_mem (fun x y -> Binop ("cmp", x, y)) lhs rhs in
+        [Binop ("^", eax, eax)] @ code @ [Set (suff,"%al"); Mov (eax, a)]
+    else if op = "/" || op = "%" then
+        let src = if op = "/" then eax else edx in
+        [Mov (rhs, eax); Cltd; IDiv lhs; Mov (src, a)]
+    else if  op = "!!" then
+        let res, code = binop_mem_mem (fun x y -> Binop (op, x, y)) lhs rhs in
+         code @ [Binop ("^", eax, eax); Binop ("cmp", L 0, res);
+             Set (suffix_for_comparing "!=", "%al"); Mov (eax, a)]
+    else if op = "&&" then
+         [Binop("^", eax, eax); Binop("^", edx, edx); 
+              Binop("cmp", L 0, lhs); Set("ne", "%al"); 
+              Binop("cmp", L 0, rhs); Set("ne", "%dl");
+              Binop("&&", edx, eax); Mov(eax, a)]
+    else
+        failwith "unsupported binop"
+
+          
+let rec compile env p = match p with
+    | [] -> env, []
+    | x::xs ->
+        let new_env,code = match x with
+            | CONST x -> let a,env' = env#allocate in env',[Mov (L x, a)]
+            | READ -> let a,env' = env#allocate in env',[Call "Lread"; Mov (eax, a)]
+            | WRITE -> let a,env' = env#pop in env',[Push a; Call "Lwrite"; Pop eax]
+            | LD name -> let a,env' = env#allocate in
+                         let var_name = env#loc name in
+                         env',(mov_mem_mem (M var_name) a)
+            | ST name -> let a,env' = (env#global name)#pop in
+                         let var_name = env#loc name in
+                         env',(mov_mem_mem a (M var_name))
+            | BINOP op -> compile_binop env op
+            | LABEL l -> env,[Label l]
+            | JMP label -> env,[Jmp label]
+            | CJMP (c, l) -> let a,env = env#pop in env,[Binop ("cmp", L 0, a); CJmp (c, l)]
+        in let env',code' = compile new_env xs in env',(code @ code')
+(* A set of strings *)           
+module S = Set.Make (String)
+
+(* Environment implementation *)
+class env =
   object (self)
-    val label_n = 0
-    val continuous_if_label = None
-    method get_continuous_if_label = continuous_if_label
-    method begin_continuous_label = {< continuous_if_label = Some (self#generate_label) >}
-    method end_continuous_label = {< continuous_if_label = None >}
-    method get_label = {< label_n = label_n + 1 >}, self#generate_label
-    method generate_label = "label" ^ string_of_int label_n
+    val stack_slots = 0        (* maximal number of stack positions *)
+    val globals     = S.empty  (* a set of global variables         *)
+    val stack       = []       (* symbolic stack                    *)
+
+    (* gets a name for a global variable *)
+    method loc x = "global_" ^ x                                 
+
+    (* allocates a fresh position on a symbolic stack *)
+    method allocate =    
+      let x, n =
+	let rec allocate' = function
+	| []                            -> ebx     , 0
+	| (S n)::_                      -> S (n+1) , n+1
+	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
+        | (M _)::s                      -> allocate' s
+	| _                             -> S 0     , 1
+	in
+	allocate' stack
+      in
+      x, {< stack_slots = max n stack_slots; stack = x::stack >}
+
+    (* pushes an operand to the symbolic stack *)
+    method push y = {< stack = y::stack >}
+
+    (* pops one operand from the symbolic stack *)
+    method pop  = let x::stack' = stack in x, {< stack = stack' >}
+
+    (* pops two operands from the symbolic stack *)
+    method pop2 = let x::y::stack' = stack in x, y, {< stack = stack' >}
+
+    (* registers a global variable in the environment *)
+    method global x  = {< globals = S.add ("global_" ^ x) globals >}
+
+    (* gets the number of allocated stack slots *)
+    method allocated = stack_slots
+
+    (* gets all global variables *)      
+    method globals = S.elements globals
   end
 
-let rec compile_expr e = match e with
-    | Language.Expr.Const x -> [CONST x]
-    | Language.Expr.Var n -> [LD n]
-    | Language.Expr.Binop (op, e1, e2) -> compile_expr e1 @ compile_expr e2 @ [BINOP op]
+(* Compiles a unit: generates x86 machine code for the stack program and surrounds it
+   with function prologue/epilogue
+*)
+let compile_unit env scode =  
+  let env, code = compile env scode in
+  env, 
+  ([Push ebp; Mov (esp, ebp); Binop ("-", L (word_size*env#allocated), esp)] @ 
+   code @
+   [Mov (ebp, esp); Pop ebp; Binop ("^", eax, eax); Ret]
+  )
 
-let rec compile_impl lb p = match p with
-    | Language.Stmt.Read name -> ([READ; ST name]), lb
-    | Language.Stmt.Write expr -> (compile_expr expr @ [WRITE]), lb
-    | Language.Stmt.Assign (name, expr) -> (compile_expr expr @ [ST name]), lb
-    | Language.Stmt.Seq (e1, e2) -> let (prg1, lb) = compile_impl lb e1 in
-                                    let (prg2, lb) = compile_impl lb e2 in
-                                    (prg1 @ prg2), lb
-    | Language.Stmt.Skip -> [], lb
-    | Language.Stmt.If (cond, thn, els) ->
-        let condition = compile_expr cond in
-        let (lb, out_label, added_new_label) = (match thn with
-            | If (_, _, _) -> (match lb#get_continuous_if_label with
-                | Some label -> (lb, label, false)
-                | None -> let (lb, label) = (lb#begin_continuous_label)#get_label
-                    in (lb, label, true))
-            | _ -> let (lb, label) = (lb#end_continuous_label)#get_label
-                        in (lb, label, true)) in
-        let (then_body, lb) = compile_impl lb thn in
-        let (lb, else_label) = lb#get_label in
-        let (else_body, lb) = compile_impl lb els in
-        condition @ [CJMP ("z", else_label)] @ then_body @
-        [JMP (out_label); LABEL else_label] @ 
-        else_body @ (if added_new_label then [LABEL out_label] else []), lb#end_continuous_label
-    | Language.Stmt.While (cond, body) -> 
-        let (lb, before_label) = lb#get_label in
-        let (do_body, lb) = compile_impl lb body in
-        let (lb, condition_label) = lb#get_label in
-        let condition = compile_expr cond in
-        [JMP condition_label; LABEL before_label] @
-        do_body @ [LABEL condition_label] @ condition @ [CJMP ("nz", before_label)], lb
-    | Language.Stmt.RepeatUntil (body, cond) -> 
-        let (prg, lb) = compile_impl lb (Language.Stmt.While (
-                                         Language.Stmt.reverse_condition cond, body)) in
-        List.tl (prg), lb
+(* Generates an assembler text for a program: first compiles the program into
+   the stack code, then generates x86 assember code, then prints the assembler file
+*)
+let genasm prog =
+  let env, code = compile_unit (new env) (SM.compile prog) in
+  let asm = Buffer.create 1024 in
+  Buffer.add_string asm "\t.data\n";
+  List.iter
+    (fun s ->
+       Buffer.add_string asm (Printf.sprintf "%s:\t.int\t0\n" s)
+    )
+    env#globals;
+  Buffer.add_string asm "\t.text\n";
+  Buffer.add_string asm "\t.globl\tmain\n";
+  Buffer.add_string asm "main:\n";
+  List.iter
+    (fun i -> Buffer.add_string asm (Printf.sprintf "%s\n" @@ show i))
+    code;
+  Buffer.contents asm
 
-let rec compile p = fst (compile_impl (new labels) p)
+(* Builds a program: generates the assembler file and compiles it with the gcc toolchain *)
+let build stmt name =
+  let outf = open_out (Printf.sprintf "%s.s" name) in
+  Printf.fprintf outf "%s" (genasm stmt);
+  close_out outf;
+  let inc = try Sys.getenv "RC_RUNTIME" with _ -> "../runtime" in
+Sys.command (Printf.sprintf "gcc -m32 -o %s %s/runtime.o %s.s" name inc name)
