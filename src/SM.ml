@@ -39,8 +39,8 @@ let rec eval (st, (s, i, o)) prog =
     | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
     | LD x     :: p -> eval (s x :: st, (s, i, o)) p
     | ST x     :: p -> eval (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
-    | LABEL l :: p -> eval env (st, (s, i, o)) p
-    | JMP l ::_-> eval env (st, (s, i, o)) (env#labeled l)
+    | LABEL _ :: p -> eval env (st, (s, i, o)) p
+    | JMP l ::p -> eval env (st, (s, i, o)) (env#labeled l)
     | CJMP (m, label)::next ->
         let x::st1 = st in
         let goto = (env#labeled label) in
