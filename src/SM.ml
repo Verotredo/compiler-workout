@@ -12,7 +12,7 @@ open Language
 (* a label                         *) | LABEL of string
 (* unconditional jump              *) | JMP   of string                                                                                                                
 (* conditional jump                *) | CJMP  of string * string with show
-
+                                                   
 (* The type for the stack machine program *)                                                               
 type prg = insn list
 
@@ -22,37 +22,42 @@ type prg = insn list
 type config = int list * Stmt.config
 
 (* Stack machine interpreter
+     val eval : env -> config -> prg -> config
+   Takes an environment, a configuration and a program, and returns a configuration as a result. The
+   environment is used to locate a label to jump to (via method env#labeled <label_name>)
+*)                         
+let hd_tl = Language.Stmt.hd_tl
+let cjmp_sat znz value = if (znz = "nz" && value <> 0) || (znz = "z" && value == 0) then true else false
+let rec eval env (st, (s, i, o)) p = if 1 == 0 then (st, (s, i, o)) else
+    let eval_expr expr = match expr with
+        | BINOP op -> (match st with
+            | (y::x::xs) -> (Language.Expr.str_to_op op x y :: xs, (s, i, o)) 
+            | _ -> failwith "Stack is empty on binop")
+        | CONST x -> (x :: st, (s, i, o))
+        | READ -> let (head, tail) = hd_tl i "Unexpected end of input" in
+                      (head :: st, (s, tail, o))
+        | WRITE -> let (head, tail) = hd_tl st "Stack is empty on write" in
+                       (tail, (s, i, o @ [head]))
+        | LD name -> (s name :: st, (s, i, o))
+        | ST name -> let (head, tail) = hd_tl st "Stack is empty on store" in
+                     let new_state = Language.Expr.update name head s in
+                     (tail, (new_state, i, o))
+        | LABEL _ -> (st, (s, i, o))
+        | _ -> failwith "impossible"
+    in match p with
+        | x::xs -> (match x with 
+            | JMP label -> eval env (st, (s, i, o)) (env#labeled label)
+            | CJMP (znz, label) -> let (head, tail) = hd_tl st "Stack is empty on cjmp" in
+                if cjmp_sat znz head
+                then eval env (tail, (s, i, o)) (env#labeled label)
+                else eval env (tail, (s, i, o)) xs
+            | _ -> eval env (eval_expr x) xs)
+        | _ -> (st, (s, i, o))
 
-     val eval : config -> prg -> config
-
-   Takes a configuration and a program, and returns a configuration as a result
- *)                        
-let rec eval env (st, (s, i, o)) prog =
-    match prog with
-    | []            -> (st, (s, i, o))
-    | BINOP op :: p ->
-        let y :: x :: st1 = st in
-        let res = Expr.eval s (Binop (op, Const x, Const y))
-        in eval env (res :: st1, (s, i, o)) p
-    | CONST c  :: p -> eval env (c :: st, (s, i, o)) p
-    | READ     :: p -> eval env ((List.hd i) :: st, (s, List.tl i, o)) p
-    | WRITE    :: p -> eval env (List.tl st, (s, i, o @ [List.hd st])) p
-    | LD x     :: p -> eval env (s x :: st, (s, i, o)) p
-    | ST x     :: p -> eval env (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
-    | LABEL _ :: p -> eval env (st, (s, i, o)) p
-    | JMP l ::p -> eval env (st, (s, i, o)) (env#labeled l)
-    | CJMP (m, label)::next ->
-        let x::st1 = st in
-        let goto = (env#labeled label) in
-        let tg = if ((m="z") && (x == 0)|| x != 0 && m = "nz") then goto else next in
-        eval env (st1, (s, i, o)) tg
 (* Top-level evaluation
-
      val run : prg -> int list -> int list
-
    Takes a program, an input stream, and returns an output stream this program calculates
 *)
-
 let run p i =
   let module M = Map.Make (String) in
   let rec make_map m = function
@@ -61,42 +66,65 @@ let run p i =
   | _ :: tl         -> make_map m tl
   in
   let m = make_map M.empty p in
+  if (1 == 0) then
+  List.fold_left (fun () pr ->
+                  Printf.printf "%s\n" (GT.transform(insn) (new @insn[show]) () pr)) () p
+  else ();
   let (_, (_, _, o)) = eval (object method labeled l = M.find l m end) ([], (Expr.empty, i, [])) p in o
-
 (* Stack machine compiler
-
      val compile : Language.Stmt.t -> prg
-
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
-let label_generator =
-  object
-    val mutable counter = 0
-    method generate =
-      counter <- counter + 1;
-      "l_" ^ string_of_int counter
+class labels =
+  object (self)
+    val label_n = 0
+    val continuous_if_label = None
+    method get_continuous_if_label = continuous_if_label
+    method begin_continuous_label = {< continuous_if_label = Some (self#generate_label) >}
+    method end_continuous_label = {< continuous_if_label = None >}
+    method get_label = {< label_n = label_n + 1 >}, self#generate_label
+    method generate_label = "label" ^ string_of_int label_n
   end
 
 let rec compile_expr e = match e with
-        | Expr.Const  n         -> [CONST n]
-        | Expr.Var    x         -> [LD x]
-        | Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op]
+    | Language.Expr.Const x -> [CONST x]
+    | Language.Expr.Var n -> [LD n]
+    | Language.Expr.Binop (op, e1, e2) -> compile_expr e1 @ compile_expr e2 @ [BINOP op]
 
-let rec compile st = match st with
-    | Stmt.Read    x       -> [READ; ST x]
-    | Stmt.Write   e       -> (compile_expr e)@[WRITE]
-    | Stmt.Assign (x, e)   -> (compile_expr e)@[ST x]
-    | Stmt.Seq    (s1, s2) -> (compile s1)@(compile s2)
-    | Stmt.Skip -> []
-    | Stmt.If (e, s1, s2) ->
-      let l_else = label_generator#generate in
-      let l_fi = label_generator#generate in
-      (compile_expr e) @ [CJMP ("z", l_else)] @ (compile s1) @ [JMP l_fi] @ [LABEL l_else] @ (compile s2) @ [LABEL l_fi]
-    | Stmt.While (e, s) ->
-      let l_expr = label_generator#generate in
-      let l_od = label_generator#generate in
-      [LABEL l_expr] @ (compile_expr e) @ [CJMP ("z", l_od)] @ (compile s) @ [JMP l_expr] @ [LABEL l_od]
-    | Stmt.RepeatUntil (e, s) ->
-      let l_repeat = label_generator#generate in
-      [LABEL l_repeat] @ (compile s) @ (compile_expr e) @ [CJMP ("z", l_repeat)]
+let rec compile_impl lb p = match p with
+    | Language.Stmt.Read name -> ([READ; ST name]), lb
+    | Language.Stmt.Write expr -> (compile_expr expr @ [WRITE]), lb
+    | Language.Stmt.Assign (name, expr) -> (compile_expr expr @ [ST name]), lb
+    | Language.Stmt.Seq (e1, e2) -> let (prg1, lb) = compile_impl lb e1 in
+                                    let (prg2, lb) = compile_impl lb e2 in
+                                    (prg1 @ prg2), lb
+    | Language.Stmt.Skip -> [], lb
+    | Language.Stmt.If (cond, thn, els) ->
+        let condition = compile_expr cond in
+        let (lb, out_label, added_new_label) = (match thn with
+            | If (_, _, _) -> (match lb#get_continuous_if_label with
+                | Some label -> (lb, label, false)
+                | None -> let (lb, label) = (lb#begin_continuous_label)#get_label
+                    in (lb, label, true))
+            | _ -> let (lb, label) = (lb#end_continuous_label)#get_label
+                        in (lb, label, true)) in
+        let (then_body, lb) = compile_impl lb thn in
+        let (lb, else_label) = lb#get_label in
+        let (else_body, lb) = compile_impl lb els in
+        condition @ [CJMP ("z", else_label)] @ then_body @
+        [JMP (out_label); LABEL else_label] @ 
+        else_body @ (if added_new_label then [LABEL out_label] else []), lb#end_continuous_label
+    | Language.Stmt.While (cond, body) -> 
+        let (lb, before_label) = lb#get_label in
+        let (do_body, lb) = compile_impl lb body in
+        let (lb, condition_label) = lb#get_label in
+        let condition = compile_expr cond in
+        [JMP condition_label; LABEL before_label] @
+        do_body @ [LABEL condition_label] @ condition @ [CJMP ("nz", before_label)], lb
+    | Language.Stmt.RepeatUntil (body, cond) -> 
+        let (prg, lb) = compile_impl lb (Language.Stmt.While (
+                                         Language.Stmt.reverse_condition cond, body)) in
+        List.tl (prg), lb
+
+let rec compile p = fst (compile_impl (new labels) p)

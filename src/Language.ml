@@ -1,11 +1,17 @@
+let counter = ref 0;;
+
+let next_var() = let result = "__repeat_variable__" ^ string_of_int !counter in
+                     counter := !counter + 1;
+                     result;;
+
 (* Opening a library for generic programming (https://github.com/dboulytchev/GT).
    The library provides "@type ..." syntax extension and plugins like show, etc.
 *)
 open GT
-open List
 
 (* Opening a library for combinator-based syntax analysis *)
 open Ostap.Combinators
+open Ostap
        
 (* Simple expressions: syntax and semantics *)
 module Expr =
@@ -39,62 +45,66 @@ module Expr =
     let update x v s = fun y -> if x = y then v else s y
 
     (* Expression evaluator
-
           val eval : state -> t -> int
  
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
-    *)
-    let of_int i = if i == 0 then false else true
-    let to_int b = if b then 1 else 0
-    let rec eval s e =
-        match e with
+     *)                                                       
+    let bool_to_int x = if x then 1 else 0
+    let int_to_bool x = if x == 0 then false else true
+
+    let boolop_with_ret_to_int op = fun lhs rhs -> bool_to_int (op (int_to_bool lhs) (int_to_bool rhs))
+    let boolop_to_int op = fun lhs rhs -> bool_to_int (op lhs rhs)
+
+    let str_to_op op = match op with
+        | "+" -> ( + )
+        | "-" -> ( - )
+        | "*" -> ( * )
+        | "/" -> ( / )
+        | "%" -> ( mod )
+        | "!!" -> boolop_with_ret_to_int ( || )
+        | "&&" -> boolop_with_ret_to_int ( && )
+        | "==" -> boolop_to_int ( == )
+        | "!=" -> boolop_to_int ( != )
+        | "<=" -> boolop_to_int ( <= )
+        | "<" -> boolop_to_int ( < )
+        | ">=" -> boolop_to_int ( >= )
+        | ">" -> boolop_to_int ( > )
+        | _ -> failwith "unsupported op"
+
+
+    let rec eval s e = match e with
         | Const x -> x
-        | Var x -> s x
-        | Binop (op, x, y) ->
-            let l = eval s x in
-            let r = eval s y in 
-            match op with
-            | "+" -> l + r
-            | "-" -> l - r
-            | "*" -> l * r
-            | "/" -> l / r
-            | "%" -> l mod r
-            | "!!" -> to_int(of_int(l) || of_int(r))
-            | "&&" -> to_int(of_int(l) && of_int(r))
-            | "==" -> to_int(l == r)
-            | "!=" -> to_int(l != r)
-            | "<" -> to_int(l < r)
-            | "<=" -> to_int(l <= r)
-            | ">" -> to_int(l > r)
-            | ">=" -> to_int(l >= r)
-            | _ -> failwith(Printf.sprintf "Undefined expression")
+        | Var n -> s n
+        | Binop (op, e1, e2) -> let r1 = eval s e1 in
+                                let r2 = eval s e2 in
+                                str_to_op op r1 r2
 
-    let parseBinop op = ostap(- $(op)), (fun x y -> Binop (op, x, y))
-   (* Expression parser. You can use the following terminals:
-
+    (* Expression parser. You can use the following terminals:
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
          DECIMAL --- a decimal constant [0-9]+ as a string
                                                                                                                   
     *)
+    let to_binop op = ostap($(op)), fun x y -> Binop (op, x, y)
+
     ostap (
-      parse: expr;
       expr:
-        !(Ostap.Util.expr
-            (fun x -> x)
-            (Array.map (fun (assoc, ops) -> assoc, List.map parseBinop ops)
-                [|
+          !(Util.expr
+               (fun x -> x)
+               (Array.map (fun (assoc, ops) -> assoc, List.map to_binop ops)
+               [|
                   `Lefta, ["!!"];
                   `Lefta, ["&&"];
-                  `Nona , ["<="; "<"; ">="; ">"; "=="; "!="];
+                  `Nona,  ["<="; ">="; "=="; "!="; ">"; "<";];
                   `Lefta, ["+"; "-"];
                   `Lefta, ["*"; "/"; "%"];
-                |]
-             )
-            primary
-        );
-        primary: c: DECIMAL {Const c} | x: IDENT {Var x} | -"(" expr -")"
+               |])
+               primary
+          );
+      primary: n:DECIMAL {Const n} | x:IDENT {Var x} | -"(" expr -")";
+      parse: expr
     )
+    
   end
                     
 (* Simple statements: syntax and sematics *)
@@ -110,38 +120,41 @@ module Stmt =
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
-    (* loop with a post-condition       *) | RepeatUntil of Expr.t * t  with show
-
+    (* loop with a post-condition       *) | RepeatUntil of t * Expr.t  with show
+                                                                    
     (* The type of configuration: a state, an input stream, an output stream *)
     type config = Expr.state * int list * int list 
 
     (* Statement evaluator
-
          val eval : config -> t -> config
        Takes a configuration and a statement, and returns another configuration
     *)
-    let reverse_cond cond = Expr.Binop ("==", cond, Expr.Const 0)
-    let rec eval cfg stmt =
-       let (st, i, o) = cfg in
-      match stmt with
-      | Read x -> (Expr.update x (List.hd i) st, List.tl i, o)
-      | Write e -> (st, i, o @ [Expr.eval st e])
-      | Assign (x, e) -> (Expr.update x (Expr.eval st e) st, i, o)
-      | Seq (s1, s2) -> eval (eval cfg s1) s2
-      | Skip -> cfg
-      | If (cond, thn, els) -> let cond_value = Expr.eval st cond in
+    let hd_tl l msg = match l with
+        | head::tail -> (head, tail)
+        | _ -> failwith(msg)
+    let reverse_condition cond = Expr.Binop ("==", cond, Expr.Const 0)
+    let rec eval (s, i, o) p = match p with
+        | Read name -> let (head, tail) = hd_tl i "Unexpected end of input" in
+                       (Expr.update name head s, tail, o)
+        | Write e -> (s, i, o @ [Expr.eval s e])
+        | Assign (name, e) -> (Expr.update name (Expr.eval s e) s, i, o)
+        | Seq (e1, e2) -> let (s1, i1, o1) = eval (s, i, o) e1 in
+                         eval (s1, i1, o1) e2
+        | Skip -> (s, i, o)
+        | If (cond, thn, els) -> let cond_value = Expr.eval s cond in
                                  if cond_value <> 0 then
-                                     eval (st, i, o) thn
+                                     eval (s, i, o) thn
                                  else
-                                     eval (st, i, o) els
-      | While (cond, body) -> let cond_value = Expr.eval st cond in
-                                if cond_value == 0 then (st, i, o)
+                                     eval (s, i, o) els
+        | While (cond, body) -> let cond_value = Expr.eval s cond in
+                                if cond_value == 0 then (s, i, o)
                                 else
-                                    let c' = eval (st, i, o) body in
+                                    let c' = eval (s, i, o) body in
                                     eval c' (While (cond, body))
-      | RepeatUntil (body, cond) -> let c' = eval (st, i, o) body in
-                                      eval c' (While (reverse_cond cond, body))
-    (* Statement parser *)        
+        | RepeatUntil (body, cond) -> let c' = eval (s, i, o) body in
+                                      eval c' (While (reverse_condition cond, body))
+
+    (* Statement parser *)
     ostap (
       stmt: "read" "(" x:IDENT ")" {Read x}
            | "write" "(" e:!(Expr.parse) ")" {Write e}
@@ -170,8 +183,9 @@ module Stmt =
             }
             | "skip" {Skip};
       parse: st1:stmt ";" st2:parse {Seq (st1, st2)} | stmt
-    )	                                                        
- end
+    )
+      
+  end
 
 (* The top-level definitions *)
 
@@ -179,13 +193,11 @@ module Stmt =
 type t = Stmt.t    
 
 (* Top-level evaluator
-
      eval : t -> int list -> int list
-
    Takes a program and its input stream, and returns the output stream
 *)
 let eval p i =
   let _, _, o = Stmt.eval (Expr.empty, i, []) p in o
 
 (* Top-level parser *)
-let parse = Stmt.parse                                                     
+let parse = Stmt.parse 
