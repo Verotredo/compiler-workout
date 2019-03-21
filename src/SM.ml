@@ -27,22 +27,20 @@ type config = int list * Stmt.config
 
    Takes a configuration and a program, and returns a configuration as a result
  *)                        
-let rec eval env scfg prog =
-    let (st, cfg)      = scfg     in
-    let (s, i, o) = cfg in
+let rec eval env (st, (s, i, o)) prog =
     match prog with
-    | []            -> scfg
+    | []            -> (st, (s, i, o))
     | BINOP op :: p ->
         let y :: x :: st1 = st in
         let res = Expr.eval s (Binop (op, Const x, Const y))
         in eval (res :: st1, (s, i, o)) p
-    | CONST c  :: p -> eval (c :: st, cfg) p
+    | CONST c  :: p -> eval (c :: st, (s, i, o)) p
     | READ     :: p -> eval ((List.hd i) :: st, (s, List.tl i, o)) p
     | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
-    | LD x     :: p -> eval (s x :: st, cfg) p
+    | LD x     :: p -> eval (s x :: st, (s, i, o)) p
     | ST x     :: p -> eval (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
-    | LABEL _ :: p -> eval env scfg p
-    | JMP l ::p -> eval env scfg (env#labeled l)
+    | LABEL _ :: p -> eval env (st, (s, i, o)) p
+    | JMP l ::p -> eval env (st, (s, i, o)) (env#labeled l)
     | CJMP (m, label)::next ->
         let x::st1 = st in
         let goto = (env#labeled label) in
