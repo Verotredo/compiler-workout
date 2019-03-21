@@ -34,8 +34,8 @@ let rec eval env scfg prog =
   | [] -> scfg
   | BINOP(op) :: rest ->
     (match st with
-     | rhs :: lhs :: tail ->
-       eval env ((Language.Expr.evalBinop op lhs rhs) :: tail, cfg) rest
+     | x :: y :: tail ->
+       eval env ((Language.Expr.parseBinop op y x) :: tail, cfg) rest
      | _ -> failwith "Empty stack")
   | CONST(value) :: rest -> eval env (value :: st, cfg) rest
   | READ :: rest ->
