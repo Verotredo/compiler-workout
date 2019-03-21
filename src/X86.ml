@@ -40,7 +40,9 @@ type instr =
 (* pops from the hardware stack to the operand          *) | Pop   of opnd
 (* call a function by a name                            *) | Call  of string
 (* returns from a function                              *) | Ret
-
+(* a label in the code                                  *) | Label   of string
+(* a conditional jump                                   *) | CJmp    of string * string
+(* a non-conditional jump                               *) | Jmp     of string
 (* Instruction printer *)
 let show instr =
   let binop = function
