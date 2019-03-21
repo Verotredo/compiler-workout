@@ -108,7 +108,7 @@ let rec compile env scode = match scode with
     | JMP l -> env, [Jmp l]
     | CJMP (m, l) ->
      let s, env = env#pop in
-     env, [Binop ("cmp", L 0, s); CJMP (m, l)]
+     env, [Binop ("cmp", L 0, s); CJmp (m, l)]
     | BINOP op -> 
       let rhs, lhs, env = env#pop2 in
       let cmp suff = env#push lhs, [Mov(L 0, eax);
