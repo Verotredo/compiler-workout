@@ -3,6 +3,7 @@
 *)
 open GT
 open List
+
 (* Opening a library for combinator-based syntax analysis *)
 open Ostap.Combinators
        
@@ -36,6 +37,7 @@ module Expr =
       to value v and returns the new state.
     *)
     let update x v s = fun y -> if x = y then v else s y
+
     (* Expression evaluator
 
           val eval : state -> t -> int
@@ -69,7 +71,7 @@ module Expr =
             | _ -> failwith(Printf.sprintf "Undefined expression")
 
     let parseBinop op = ostap(- $(op)), (fun x y -> Binop (op, x, y))
-    (* Expression parser. You can use the following terminals:
+   (* Expression parser. You can use the following terminals:
 
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
          DECIMAL --- a decimal constant [0-9]+ as a string
@@ -91,8 +93,7 @@ module Expr =
             primary
         );
         primary: c: DECIMAL {Const c} | x: IDENT {Var x} | -"(" expr -")"
-    )
-    
+
   end
                     
 (* Simple statements: syntax and sematics *)
@@ -104,7 +105,11 @@ module Stmt =
     (* read into the variable           *) | Read   of string
     (* write the value of an expression *) | Write  of Expr.t
     (* assignment                       *) | Assign of string * Expr.t
-    (* composition                      *) | Seq    of t * t with show
+    (* composition                      *) | Seq    of t * t 
+    (* empty statement                  *) | Skip
+    (* conditional                      *) | If     of Expr.t * t * t
+    (* loop with a pre-condition        *) | While  of Expr.t * t
+    (* loop with a post-condition       *) (* add yourself *)  with show
 
     (* The type of configuration: a state, an input stream, an output stream *)
     type config = Expr.state * int list * int list 
@@ -115,7 +120,6 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-
     let rec eval cfg st =
         let (s, i, o) = cfg in
         match st with
@@ -150,7 +154,6 @@ type t = Stmt.t
 *)
 let eval p i =
   let _, _, o = Stmt.eval (Expr.empty, i, []) p in o
-
 
 (* Top-level parser *)
 let parse = Stmt.parse                                                     

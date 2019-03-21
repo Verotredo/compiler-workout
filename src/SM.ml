@@ -8,7 +8,10 @@ open Language
 (* read to stack                   *) | READ
 (* write from stack                *) | WRITE
 (* load a variable to the stack    *) | LD    of string
-(* store a variable from the stack *) | ST    of string with show
+(* store a variable from the stack *) | ST    of string
+(* a label                         *) | LABEL of string
+(* unconditional jump              *) | JMP   of string                                                                                                                
+(* conditional jump                *) | CJMP  of string * string with show
 
 (* The type for the stack machine program *)                                                               
 type prg = insn list
@@ -43,7 +46,16 @@ let rec eval (st, (s, i, o)) prog =
 
    Takes a program, an input stream, and returns an output stream this program calculates
 *)
-let run p i = let (_, (_, _, o)) = eval ([], (Expr.empty, i, [])) p in o
+
+let run p i =
+  let module M = Map.Make (String) in
+  let rec make_map m = function
+  | []              -> m
+  | (LABEL l) :: tl -> make_map (M.add l tl m) tl
+  | _ :: tl         -> make_map m tl
+  in
+  let m = make_map M.empty p in
+  let (_, (_, _, o)) = eval (object method labeled l = M.find l m end) ([], (Expr.empty, i, [])) p in o
 
 (* Stack machine compiler
 
@@ -51,15 +63,5 @@ let run p i = let (_, (_, _, o)) = eval ([], (Expr.empty, i, [])) p in o
 
    Takes a program in the source language and returns an equivalent program for the
    stack machine
- *)
-
-let rec compile_expr e = match e with
-        | Language.Expr.Const  n         -> [CONST n]
-        | Language.Expr.Var    x         -> [LD x]
-        | Language.Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op]
-
-let rec compile st = match st with
-    | Language.Stmt.Read    x       -> [READ; ST x]
-    | Language.Stmt.Write   e       -> (compile_expr e)@[WRITE]
-    | Language.Stmt.Assign (x, e)   -> (compile_expr e)@[ST x]
-    | Language.Stmt.Seq    (s1, s2) -> (compile s1)@(compile s2)
+*)
+let compile p = failwith "Not yet implemented"

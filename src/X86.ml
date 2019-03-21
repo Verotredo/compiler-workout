@@ -40,6 +40,12 @@ type instr =
 (* pops from the hardware stack to the operand          *) | Pop   of opnd
 (* call a function by a name                            *) | Call  of string
 (* returns from a function                              *) | Ret
+<<<<<<< HEAD
+=======
+(* a label in the code                                  *) | Label of string
+(* a conditional jump                                   *) | CJmp  of string * string
+(* a non-conditional jump                               *) | Jmp   of string
+>>>>>>> upstream/hw5
 
 (* Instruction printer *)
 let show instr =
@@ -69,6 +75,12 @@ let show instr =
   | Pop    s           -> Printf.sprintf "\tpopl\t%s"      (opnd s)
   | Ret                -> "\tret"
   | Call   p           -> Printf.sprintf "\tcall\t%s" p
+<<<<<<< HEAD
+=======
+  | Label  l           -> Printf.sprintf "%s:\n" l
+  | Jmp    l           -> Printf.sprintf "\tjmp\t%s" l
+  | CJmp  (s , l)      -> Printf.sprintf "\tj%s\t%s" s l
+>>>>>>> upstream/hw5
 
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
@@ -80,6 +92,7 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
+<<<<<<< HEAD
 let rec compile env scode = match scode with
 | [] -> env, []
 | instr :: scode' ->
@@ -138,6 +151,9 @@ let rec compile env scode = match scode with
   in
   let env, asm' = compile env scode' in
   env, asm @ asm'   
+=======
+let compile env code = failwith "Not yet implemented"
+>>>>>>> upstream/hw5
 
 (* A set of strings *)           
 module S = Set.Make (String)
@@ -159,6 +175,10 @@ class env =
 	| []                            -> ebx     , 0
 	| (S n)::_                      -> S (n+1) , n+1
 	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
+<<<<<<< HEAD
+=======
+        | (M _)::s                      -> allocate' s
+>>>>>>> upstream/hw5
 	| _                             -> S 0     , 1
 	in
 	allocate' stack
@@ -169,7 +189,11 @@ class env =
     method push y = {< stack = y::stack >}
 
     (* pops one operand from the symbolic stack *)
+<<<<<<< HEAD
     method pop  = let x::stack'    = stack in x,    {< stack = stack' >}
+=======
+    method pop  = let x::stack' = stack in x, {< stack = stack' >}
+>>>>>>> upstream/hw5
 
     (* pops two operands from the symbolic stack *)
     method pop2 = let x::y::stack' = stack in x, y, {< stack = stack' >}
@@ -184,7 +208,11 @@ class env =
     method globals = S.elements globals
   end
 
+<<<<<<< HEAD
 (* compiles a unit: generates x86 machine code for the stack program and surrounds it
+=======
+(* Compiles a unit: generates x86 machine code for the stack program and surrounds it
+>>>>>>> upstream/hw5
    with function prologue/epilogue
 *)
 let compile_unit env scode =  
