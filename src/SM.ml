@@ -35,7 +35,7 @@ let rec eval env scfg prog =
     | BINOP op :: p ->
         let y :: x :: st1 = st in
         let res = Expr.eval s (Binop (op, Const x, Const y))
-        in eval (res :: st1, cfg) p
+        in eval (res :: st1, (s, i, o)) p
     | CONST c  :: p -> eval (c :: st, cfg) p
     | READ     :: p -> eval ((List.hd i) :: st, (s, List.tl i, o)) p
     | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
