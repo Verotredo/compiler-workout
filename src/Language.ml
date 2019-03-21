@@ -120,6 +120,7 @@ module Stmt =
          val eval : config -> t -> config
        Takes a configuration and a statement, and returns another configuration
     *)
+    let reverse_cond cond = Expr.Binop ("==", cond, Expr.Const 0)
     let rec eval cfg stmt =
        let (st, i, o) = cfg in
       match stmt with
@@ -128,36 +129,47 @@ module Stmt =
       | Assign (x, e) -> (Expr.update x (Expr.eval st e) st, i, o)
       | Seq (s1, s2) -> eval (eval cfg s1) s2
       | Skip -> cfg
-      | If (e, s1, s2) -> eval cfg (if Expr.eval st e != 0 then s1 else s2)
-      | While (e, s) ->
-        if Expr.eval st e != 0 then eval (eval cfg s) stmt else cfg
-      | RepeatUntil (e, s) ->
-        let ((st', _, _) as cfg') = eval cfg s in
-        if Expr.eval st' e = 0 then eval cfg' stmt else cfg'
+      | If (cond, thn, els) -> let cond_value = Expr.eval st cond in
+                                 if cond_value <> 0 then
+                                     eval (st, i, o) thn
+                                 else
+                                     eval (st, i, o) els
+      | While (cond, body) -> let cond_value = Expr.eval st cond in
+                                if cond_value == 0 then (st, i, o)
+                                else
+                                    let c' = eval (st, i, o) body in
+                                    eval c' (While (cond, body))
+      | RepeatUntil (body, cond) -> let c' = eval (st, i, o) body in
+                                      eval c' (While (reverse_cond cond, body))
     (* Statement parser *)        
     ostap (
-      parse  : seq | stmt;
-      stmt   : read | write | assign | skip | if' | while' | for' | repeat;
-      read   : %"read" -"(" x:IDENT -")" { Read x };
-      write  : %"write" -"(" e:!(Expr.parse) -")" { Write e };
-      assign : x:IDENT -":=" e:!(Expr.parse) { Assign (x, e) };
-      seq    : s1:stmt -";" s2:parse { Seq(s1, s2) };
-      skip   : %"skip" { Skip };
-      if'    : %"if" e:!(Expr.parse)
-               %"then" s1:parse
-                 elifs :(%"elif" !(Expr.parse) %"then" parse)*
-                 else' :(%"else" parse)? %"fi"
-                   {
-                     let else'' = match else' with
-                       | Some t -> t
-                       | None -> Skip
-                     in
-                     let else''' = List.fold_right (fun (e', t') t -> If (e', t', t)) elifs else'' in
-                     If (e, s1, else''')
-                   };
-      while' : %"while" e:!(Expr.parse) %"do" s:parse %"od" { While (e, s) };
-      for'   : %"for" s1:parse "," e:!(Expr.parse) "," s2:parse %"do" s3:parse %"od" { Seq (s1, While (e, Seq (s3, s2))) };
-      repeat : %"repeat" s:parse %"until" e:!(Expr.parse) { RepeatUntil (e, s) }
+      stmt: "read" "(" x:IDENT ")" {Read x}
+           | "write" "(" e:!(Expr.parse) ")" {Write e}
+           | x:IDENT ":=" e:!(Expr.parse) {Assign (x, e)}
+           | "if" condition:!(Expr.parse)
+                "then" th:!(parse)
+                elif:(%"elif" !(Expr.parse) %"then" !(parse))*
+                els:(%"else" !(parse))?
+                "fi"
+                {
+                    let else_body = match els with
+                        | Some x -> x
+                        | _ -> Skip
+                    in
+                    let t = List.fold_right (fun (cond, body) curr -> If (cond, body, curr)) elif else_body in
+                    If (condition, th, t)
+                }
+            | "while" condition:!(Expr.parse) "do" body:!(parse) "od" { While (condition, body)}
+            | "for" init:!(parse) "," cond:!(Expr.parse) "," step:!(parse) "do" body:!(parse) "od"
+            {
+                Seq(init, While(cond, Seq(body, step)))
+            }
+            | "repeat" body:!(parse) "until" cond:!(Expr.parse)
+            { 
+                RepeatUntil (body, cond)
+            }
+            | "skip" {Skip};
+      parse: st1:stmt ";" st2:parse {Seq (st1, st2)} | stmt
     )	                                                        
  end
 
