@@ -30,7 +30,7 @@ type config = int list * Stmt.config
 let rec eval env scfg prog =
     let (st, cfg) = scfg     in
     let (s, i, o) = cfg in
-  match program with
+  match prog with
   | [] -> scfg
   | BINOP(op) :: rest ->
     (match stack with
