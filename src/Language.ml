@@ -131,13 +131,13 @@ module Stmt =
       | Seq(stmt1, stmt2) -> eval (eval conf stmt1) stmt2
       | Skip -> conf
       | If(cond, then_branch, else_branch) ->
-        if Expr.bool_from_int (Expr.eval st cond)
+        if Expr.of_int (Expr.eval st cond)
         then eval conf then_branch
         else eval conf else_branch
       | While(cond, body) -> 
         let rec evalWhile conf =
           let (st, _, _) = conf in
-          if Expr.bool_from_int (Expr.eval st cond)
+          if Expr.of_int (Expr.eval st cond)
           then evalWhile (eval conf body)
           else conf
         in
@@ -146,7 +146,7 @@ module Stmt =
         let rec evalRepeatUntil conf =
           let conf = eval conf body in
           let (st, _, _) = conf in
-          if Expr.bool_from_int (Expr.eval st cond)
+          if Expr.of_int (Expr.eval st cond)
           then conf
           else evalRepeatUntil conf
         in
