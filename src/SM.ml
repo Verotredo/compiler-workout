@@ -28,7 +28,7 @@ type config = int list * Stmt.config
    Takes a configuration and a program, and returns a configuration as a result
  *)                        
 let rec eval env scfg prog =
-    let (st, scfg)      = scfg     in
+    let (st, cfg)      = scfg     in
     let (s, i, o) = cfg in
     match prog with
     | []            -> scfg
