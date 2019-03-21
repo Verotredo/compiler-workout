@@ -120,104 +120,46 @@ module Stmt =
          val eval : config -> t -> config
        Takes a configuration and a statement, and returns another configuration
     *)
-        let rec eval conf stmt =
-      let (st, i, o) = conf in
+    let rec eval cfg stmt =
+       let (st, i, o) = cfg in
       match stmt with
-      | Read(var) -> (match i with
-        | [] -> failwith (Printf.sprintf "Reached EOF")
-        | head :: tail -> (Expr.update var head st, tail, o))
-      | Write(expr) -> (st, i, o @ [Expr.eval st expr])
-      | Assign(var, expr) -> (Expr.update var (Expr.eval st expr) st, i, o)
-      | Seq(stmt1, stmt2) -> eval (eval conf stmt1) stmt2
-      | Skip -> conf
-      | If(cond, then_branch, else_branch) ->
-        if Expr.of_int (Expr.eval st cond)
-        then eval conf then_branch
-        else eval conf else_branch
-      | While(cond, body) -> 
-        let rec evalWhile conf =
-          let (st, _, _) = conf in
-          if Expr.of_int (Expr.eval st cond)
-          then evalWhile (eval conf body)
-          else conf
-        in
-        evalWhile conf
-      | RepeatUntil(body, cond) ->
-        let rec evalRepeatUntil conf =
-          let conf = eval conf body in
-          let (st, _, _) = conf in
-          if Expr.of_int (Expr.eval st cond)
-          then conf
-          else evalRepeatUntil conf
-        in
-        evalRepeatUntil conf
-
-    (* Statement parser *)
+      | Read x -> (Expr.update x (List.hd i) st, List.tl i, o)
+      | Write e -> (st, i, o @ [Expr.eval st e])
+      | Assign (x, e) -> (Expr.update x (Expr.eval st e) st, i, o)
+      | Seq (s1, s2) -> eval (eval cfg s1) s2
+      | Skip -> cfg
+      | If (e, s1, s2) -> eval cfg (if Expr.eval st e != 0 then s1 else s2)
+      | While (e, s) ->
+        if Expr.eval st e != 0 then eval (eval cfg s) stmt else cfg
+      | RepeatUntil (e, s) ->
+        let ((st', _, _) as cfg') = eval cfg s in
+        if Expr.eval st' e = 0 then eval cfg' stmt else cfg'
+    (* Statement parser *)        
     ostap (
-      parse:
-        top_level_stmt;
-      top_level_stmt:
-        stmt1: stmt -";" stmt2: top_level_stmt { Seq(stmt1, stmt2) } | stmt;
-      stmt: 
-        read_stmt   |
-        write_stmt  |
-        assign_stmt |
-        skip_stmt   |
-        if_stmt     |
-        while_stmt  |
-        repeat_stmt |
-        for_stmt;
-      assign_stmt:
-        x: IDENT -":=" e: !(Expr.expr) { Assign(x, e) };
-      read_stmt:
-        - !(Util.keyword)["read"] -"(" x: IDENT -")" { Read(x) };
-      write_stmt:
-        - !(Util.keyword)["write"] -"(" e: !(Expr.expr) -")" { Write(e) };
-      skip_stmt:
-        - !(Util.keyword)["skip"] { Skip };
-      condition_part:
-        cond: !(Expr.expr)
-        - !(Util.keyword)["then"] then_branch: top_level_stmt
-        { (cond, then_branch) };
-      if_stmt:
-        - !(Util.keyword)["if"] first_cond: condition_part
-        elif_branches: (- !(Util.keyword)["elif"] condition_part)*
-        else_branch: (- !(Util.keyword)["else"] top_level_stmt)?
-        - !(Util.keyword)["fi"]
-        {
-          let (cond, body) = first_cond in
-          let else_branch = match else_branch with
-          | None -> Skip
-          | Some stmt -> stmt
-          in
-          let fold_elif (cond, then_branch) else_branch = 
-            If(cond, then_branch, else_branch)
-          in
-          let elif_bodies =
-            List.fold_right fold_elif elif_branches else_branch
-          in
-          If(cond, body, elif_bodies)
-        };
-      while_stmt:
-        - !(Util.keyword)["while"] cond: !(Expr.expr)
-        - !(Util.keyword)["do"]
-        body: top_level_stmt
-        - !(Util.keyword)["od"]
-        { While(cond, body) };
-      repeat_stmt:
-        - !(Util.keyword)["repeat"]
-        body: top_level_stmt
-        - !(Util.keyword)["until"]
-        cond: !(Expr.expr)
-        { RepeatUntil(body, cond) };
-      for_stmt:
-        - !(Util.keyword)["for"]
-        init: stmt -"," cond: !(Expr.expr) -"," inc: stmt
-        - !(Util.keyword)["do"] body: top_level_stmt - !(Util.keyword)["od"]
-        { Seq(init, While(cond, Seq(body, inc))) }
-    )
-      
-  end
+      parse  : seq | stmt;
+      stmt   : read | write | assign | skip | if' | while' | for' | repeat;
+      read   : %"read" -"(" x:IDENT -")" { Read x };
+      write  : %"write" -"(" e:!(Expr.parse) -")" { Write e };
+      assign : x:IDENT -":=" e:!(Expr.parse) { Assign (x, e) };
+      seq    : s1:stmt -";" s2:parse { Seq(s1, s2) };
+      skip   : %"skip" { Skip };
+      if'    : %"if" e:!(Expr.parse)
+               %"then" s1:parse
+                 elifs :(%"elif" !(Expr.parse) %"then" parse)*
+                 else' :(%"else" parse)? %"fi"
+                   {
+                     let else'' = match else' with
+                       | Some t -> t
+                       | None -> Skip
+                     in
+                     let else''' = List.fold_right (fun (e', t') t -> If (e', t', t)) elifs else'' in
+                     If (e, s1, else''')
+                   };
+      while' : %"while" e:!(Expr.parse) %"do" s:parse %"od" { While (e, s) };
+      for'   : %"for" s1:parse "," e:!(Expr.parse) "," s2:parse %"do" s3:parse %"od" { Seq (s1, While (e, Seq (s3, s2))) };
+      repeat : %"repeat" s:parse %"until" e:!(Expr.parse) { RepeatUntil (e, s) }
+    )	                                                        
+ end
 
 (* The top-level definitions *)
 
