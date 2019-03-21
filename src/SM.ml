@@ -33,12 +33,12 @@ let rec eval env (st, (s, i, o)) prog =
     | BINOP op :: p ->
         let y :: x :: st1 = st in
         let res = Expr.eval s (Binop (op, Const x, Const y))
-        in eval (res :: st1, (s, i, o)) p
-    | CONST c  :: p -> eval (c :: st, (s, i, o)) p
-    | READ     :: p -> eval ((List.hd i) :: st, (s, List.tl i, o)) p
-    | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
-    | LD x     :: p -> eval (s x :: st, (s, i, o)) p
-    | ST x     :: p -> eval (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
+        in eval env (res :: st1, (s, i, o)) p
+    | CONST c  :: p -> eval env (c :: st, (s, i, o)) p
+    | READ     :: p -> eval env ((List.hd i) :: st, (s, List.tl i, o)) p
+    | WRITE    :: p -> eval env (List.tl st, (s, i, o @ [List.hd st])) p
+    | LD x     :: p -> eval env (s x :: st, (s, i, o)) p
+    | ST x     :: p -> eval env (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
     | LABEL _ :: p -> eval env (st, (s, i, o)) p
     | JMP l ::p -> eval env (st, (s, i, o)) (env#labeled l)
     | CJMP (m, label)::next ->
