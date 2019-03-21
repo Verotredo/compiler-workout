@@ -39,7 +39,13 @@ let rec eval (st, (s, i, o)) prog =
     | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
     | LD x     :: p -> eval (s x :: st, (s, i, o)) p
     | ST x     :: p -> eval (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
-    
+    | LABEL l :: p -> eval env (st, (s, i, o)) p
+    | JMP l ::_-> eval env (st, (s, i, o)) (env#labeled l)
+    | CJMP (m, label)::next ->
+        let x::st1 = st in
+        let goto = (env#labeled label) in
+        let tg = if ((m="z") && (x == 0)|| x != 0 && m = "nz") then goto else next in
+        eval env (st1, (s, i, o)) tg
 (* Top-level evaluation
 
      val run : prg -> int list -> int list
@@ -64,4 +70,33 @@ let run p i =
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
-let compile p = failwith "Not yet implemented"
+let label_generator =
+  object
+    val mutable counter = 0
+    method generate =
+      counter <- counter + 1;
+      "l_" ^ string_of_int counter
+  end
+
+let rec compile_expr e = match e with
+        | Expr.Const  n         -> [CONST n]
+        | Expr.Var    x         -> [LD x]
+        | Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op]
+
+let rec compile st = match st with
+    | Stmt.Read    x       -> [READ; ST x]
+    | Stmt.Write   e       -> (compile_expr e)@[WRITE]
+    | Stmt.Assign (x, e)   -> (compile_expr e)@[ST x]
+    | Stmt.Seq    (s1, s2) -> (compile s1)@(compile s2)
+    | Stmt.Skip -> []
+    | Stmt.If (e, s1, s2) ->
+      let l_else = label_generator#generate in
+      let l_fi = label_generator#generate in
+      (compile_expr e) @ [CJMP ("z", l_else)] @ (compile s1) @ [JMP l_fi] @ [LABEL l_else] @ (compile s2) @ [LABEL l_fi]
+    | Stmt.While (e, s) ->
+      let l_expr = label_generator#generate in
+      let l_od = label_generator#generate in
+      [LABEL l_expr] @ (compile_expr e) @ [CJMP ("z", l_od)] @ (compile s) @ [JMP l_expr] @ [LABEL l_od]
+    | Stmt.RepeatUntil (e, s) ->
+      let l_repeat = label_generator#generate in
+      [LABEL l_repeat] @ (compile s) @ (compile_expr e) @ [CJMP ("z", l_repeat)]

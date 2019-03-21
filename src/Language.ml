@@ -109,7 +109,7 @@ module Stmt =
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
-    (* loop with a post-condition       *) (* add yourself *)  with show
+    (* loop with a post-condition       *) | RepeatUntil of Expr.t * t  with show
 
     (* The type of configuration: a state, an input stream, an output stream *)
     type config = Expr.state * int list * int list 
@@ -117,28 +117,47 @@ module Stmt =
     (* Statement evaluator
 
          val eval : config -> t -> config
-
        Takes a configuration and a statement, and returns another configuration
     *)
-    let rec eval cfg st =
-        let (s, i, o) = cfg in
-        match st with
-        | Read    x       -> (Expr.update x (List.hd i) s, List.tl i, o)
-        | Write   e       -> (s, i, o @ [Expr.eval s e])
-        | Assign (v, e)   -> (Expr.update v (Expr.eval s e) s, i, o)
-        | Seq    (e1, e2) ->
-            let stmt = eval cfg e1
-            in eval stmt e2
-    
+    let rec eval cfg stmt =
+       let (st, i, o) = cfg in
+      match stmt with
+      | Read x -> (Expr.update x (List.hd i) st, List.tl i, o)
+      | Write e -> (st, i, o @ [Expr.eval st e])
+      | Assign (x, e) -> (Expr.update x (Expr.eval st e) st, i, o)
+      | Seq (s1, s2) -> eval (eval cfg s1) s2
+      | Skip -> cfg
+      | If (e, s1, s2) -> eval cfg (if Expr.eval st e != 0 then s1 else s2)
+      | While (e, s) ->
+        if Expr.eval st e != 0 then eval (eval cfg s) stmt else cfg
+      | RepeatUntil (e, s) ->
+        let ((stm, _, _) as cfgm) = eval cfg s in
+        if Expr.eval stm e = 0 then eval cfgm stmt else cfgm
     (* Statement parser *)        
     ostap (
-      stmt:
-          x:IDENT ":=" e:!(Expr.expr)    {Assign (x, e)}
-        | "write" "(" e:!(Expr.expr) ")" {Write e}
-        | "read" "(" x:IDENT ")"         {Read x} ;
-
-       parse: s:stmt ";" rest:parse {Seq (s, rest)} | stmt
-    )	                                                       
+      parse  : seq | stmt;
+      stmt   : read | write | assign | skip | if' | while' | for' | repeat;
+      read   : %"read" -"(" x:IDENT -")" { Read x };
+      write  : %"write" -"(" e:!(Expr.parse) -")" { Write e };
+      assign : x:IDENT -":=" e:!(Expr.parse) { Assign (x, e) };
+      seq    : s1:stmt -";" s2:parse { Seq(s1, s2) };
+      skip   : %"skip" { Skip };
+      if'    : %"if" e:!(Expr.parse)
+               %"then" s1:parse
+                 elifs :(%"elif" !(Expr.parse) %"then" parse)*
+                 else' :(%"else" parse)? %"fi"
+                   {
+                     let else'' = match else' with
+                       | Some t -> t
+                       | None -> Skip
+                     in
+                     let else''' = List.fold_right (fun (e', t') t -> If (e', t', t)) elifs else'' in
+                     If (e, s1, else''')
+                   };
+      while' : %"while" e:!(Expr.parse) %"do" s:parse %"od" { While (e, s) };
+      for'   : %"for" s1:parse "," e:!(Expr.parse) "," s2:parse %"do" s3:parse %"od" { Seq (s1, While (e, Seq (s3, s2))) };
+      repeat : %"repeat" s:parse %"until" e:!(Expr.parse) { RepeatUntil (e, s) }
+    )	                                                        
  end
 
 (* The top-level definitions *)
