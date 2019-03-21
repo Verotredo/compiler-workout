@@ -28,37 +28,26 @@ type config = int list * Stmt.config
    Takes a configuration and a program, and returns a configuration as a result
  *)                        
 let rec eval env scfg prog =
-    let (st, cfg) = scfg     in
+    let (st, scfg)      = scfg     in
     let (s, i, o) = cfg in
-  match prog with
-  | [] -> scfg
-  | BINOP op :: rest ->
+    match prog with
+    | []            -> scfg
+    | BINOP op :: p ->
         let y :: x :: st1 = st in
         let res = Expr.eval s (Binop (op, Const x, Const y))
-        in eval (res :: st1, (s, i, o)) rest
-  | CONST(value) :: rest -> eval env (value :: st, cfg) rest
-  | READ :: rest ->
-    (match i with
-     | head :: tail -> eval env (head :: st, (s, tail, o)) rest
-     | [] -> failwith "Empty stack")
-  | WRITE :: rest -> 
-    (match st with
-     | head :: tail -> eval env (tail, (s, i, o @ [head])) rest
-     | [] -> failwith "Empty stack")
-  | LD(var) :: rest -> eval env ((s var) :: st, cfg) rest
-  | ST(var) :: rest ->
-    (match st with
-     | head :: tail ->
-       eval env (tail, (Language.Expr.update var head s, i, o)) rest
-     | [] -> failwith "Empty stack")
-  | LABEL(_) :: rest -> eval env scfg rest
-  | JMP(l) :: rest -> eval env scfg (env#labeled l)
-  | CJMP(jumpOnZero, l) :: rest ->
-    (match st with
-     | head :: tail -> if (Expr.bool_from_int head) != jumpOnZero
-                       then eval env scfg (env#labeled l)
-                       else eval env scfg rest
-     | [] -> failwith "Empty stack")
+        in eval (res :: st1, cfg) p
+    | CONST c  :: p -> eval (c :: st, cfg) p
+    | READ     :: p -> eval ((List.hd i) :: st, (s, List.tl i, o)) p
+    | WRITE    :: p -> eval (List.tl st, (s, i, o @ [List.hd st])) p
+    | LD x     :: p -> eval (s x :: st, cfg) p
+    | ST x     :: p -> eval (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
+    | LABEL _ :: p -> eval env scfg p
+    | JMP l ::p -> eval env scfg (env#labeled l)
+    | CJMP (m, label)::next ->
+        let x::st1 = st in
+        let goto = (env#labeled label) in
+        let tg = if ((m="z") && (x == 0)|| x != 0 && m = "nz") then goto else next in
+        eval env (st1, (s, i, o)) tg
 (* Top-level evaluation
 
      val run : prg -> int list -> int list
