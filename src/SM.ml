@@ -41,11 +41,10 @@ let rec eval env (st, (s, i, o)) prog =
     | ST x     :: p -> eval env (List.tl st, (Expr.update x (List.hd st) s, i, o)) p 
     | LABEL _ :: p -> eval env (st, (s, i, o)) p
     | JMP l ::p -> eval env (st, (s, i, o)) (env#labeled l)
-    | CJMP (m, label)::next ->
-        let x::st1 = st in
-        let goto = (env#labeled label) in
-        let tg = if ((m="z") && (x == 0)|| x != 0 && m = "nz") then goto else next in
-        eval env (st1, (s, i, o)) tg
+    | CJMP (z, l) :: p ->
+        if (z = "z" && (List.hd st) == 0 || z = "nz" && (List.hd st) != 0)
+          then eval env (List.tl st, (s, i, o)) (env#labeled l) 
+          else eval env (List.tl st, (s, i, o)) p
 (* Top-level evaluation
 
      val run : prg -> int list -> int list
@@ -78,25 +77,36 @@ let label_generator =
       "l_" ^ string_of_int counter
   end
 
-let rec compile_expr e = match e with
-        | Expr.Const  n         -> [CONST n]
-        | Expr.Var    x         -> [LD x]
-        | Expr.Binop (op, a, b) -> (compile_expr a)@(compile_expr b)@[BINOP op]
-
-let rec compile st = match st with
-    | Stmt.Read    x       -> [READ; ST x]
-    | Stmt.Write   e       -> (compile_expr e)@[WRITE]
-    | Stmt.Assign (x, e)   -> (compile_expr e)@[ST x]
-    | Stmt.Seq    (s1, s2) -> (compile s1)@(compile s2)
-    | Stmt.Skip -> []
+let rec compile_block stmt end_label =
+  let rec expr = function
+    | Expr.Var x -> [LD x]
+    | Expr.Const n -> [CONST n]
+    | Expr.Binop (op, x, y) -> expr x @ expr y @ [BINOP op] in
+  match stmt with
+    | Stmt.Seq (s1, s2) -> 
+      let l_end1 = label_generator#generate in
+      let prg1, used1 = compile_block s1 l_end1 in
+      let prg2, used2 = compile_block s2 end_label in
+      prg1 @ (if used1 then [LABEL l_end1] else []) @ prg2, used2
+    | Stmt.Read x -> [READ; ST x], false
+    | Stmt.Write e -> expr e @ [WRITE], false
+    | Stmt.Assign (x, e) -> expr e @ [ST x], false
+    | Stmt.Skip -> [], false
     | Stmt.If (e, s1, s2) ->
       let l_else = label_generator#generate in
-      let l_fi = label_generator#generate in
-      (compile_expr e) @ [CJMP ("z", l_else)] @ (compile s1) @ [JMP l_fi] @ [LABEL l_else] @ (compile s2) @ [LABEL l_fi]
+      let if_prg, used1 = compile_block s1 end_label in
+      let else_prg, used2 = compile_block s2 end_label in
+      expr e @ [CJMP ("z", l_else)] @ if_prg @ [JMP end_label] @ [LABEL l_else] @ else_prg @ [JMP end_label], true
     | Stmt.While (e, s) ->
-      let l_expr = label_generator#generate in
-      let l_od = label_generator#generate in
-      [LABEL l_expr] @ (compile_expr e) @ [CJMP ("z", l_od)] @ (compile s) @ [JMP l_expr] @ [LABEL l_od]
-    | Stmt.RepeatUntil (e, s) ->
-      let l_repeat = label_generator#generate in
-      [LABEL l_repeat] @ (compile s) @ (compile_expr e) @ [CJMP ("z", l_repeat)]
+      let l_cond = label_generator#generate in
+      let l_loop = label_generator#generate in
+      let (loop_prg, _) = compile_block s l_cond in
+      [JMP l_cond; LABEL l_loop] @ loop_prg @ [LABEL l_cond] @ expr e @ [CJMP ("nz", l_loop)], false
+    | Stmt.Repeat (s, e) ->
+        let l_repeat = label_generator#generate in
+        let repeat_prg = compile s in
+        [LABEL l_repeat] @ repeat_prg @ expr e @ [CJMP ("z", l_repeat)], false
+and compile stmt =
+  let end_label = label_generator#generate in
+  let prg, used = compile_block stmt end_label in
+  prg @ (if used then [LABEL end_label] else [])

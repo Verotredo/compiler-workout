@@ -87,25 +87,23 @@ open SM
 let rec compile env scode = match scode with
 | [] -> env, []
 | instr :: scode' ->
-  let env, asm =
-    match instr with
-    | CONST n ->
+  let env, asm = match instr with
+    | CONST x ->
       let s, env = env#allocate in
-      env, [Comment(Printf.sprintf "CONST %d" n); Mov(L n, s)]
+      env, [ Mov(L x, s)]
     | READ ->
       let s, env = env#allocate in
-      env, [Comment("READ"); Call "Lread"; Mov (eax, s)]
+      env, [ Call "Lread"; Mov (eax, s)]
     | WRITE ->
       let s, env = env#pop in
-      env, [Comment("WRITE"); Push s; Call "Lwrite"; Pop eax]
+      env, [ Push s; Call "Lwrite"; Pop eax]
     | LD x ->
       let s, env = (env#global x)#allocate in
-      env, [Comment(Printf.sprintf "LD \"%s\"" x);
-            Mov(M (env#loc x), eax);
+      env, [Mov(M (env#loc x), eax);
             Mov(eax, s)]
     | ST x ->
       let s, env = (env#global x)#pop in
-      env, [Comment(Printf.sprintf "ST \"%s\"" x); Mov(s, M (env#loc x))]
+      env
     | BINOP op -> 
       let rhs, lhs, env = env#pop2 in
       let cmp suff = env#push lhs, [Mov(rhs, edx);
@@ -145,16 +143,14 @@ let rec compile env scode = match scode with
        | "!!" -> logical "!!"
        | _ -> failwith (Printf.sprintf "Unsupported binary operator %s" op)
       in
-      env, Comment(Printf.sprintf "BINOP \"%s\"" op) :: instructions
+      env, 
     | LABEL(l) ->
-      env, [Comment(Printf.sprintf "LABEL %s" l); Label(l)]
+      env, [Label l]
     | JMP(l) ->
-      env, [Comment(Printf.sprintf "JMP %s" l); Jmp(l)]
+      env, [Jmp l]
     | CJMP(jumpOnZero, l) ->
       let s, env = env#pop in
-      let suff = if jumpOnZero then "e" else "ne" in
-      env, [Comment(Printf.sprintf "CJMP(%B, %s)" jumpOnZero l);
-            Binop("cmp", L 0, s); CJmp(suff, l)]
+      env, Binop("cmp", L 0, s); CJmp(z, l)]
   in
   let env, asm' = compile env scode' in
   env, asm @ asm'  
