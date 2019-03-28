@@ -107,8 +107,8 @@ let rec compile_exp stmt end_label =
   match stmt with
     | Stmt.Seq (s1, s2) -> 
       let l_end1 = label_generator#generate in
-      let prg1, used1 = compile_block s1 l_end1 in
-      let prg2, used2 = compile_block s2 end_label in
+      let prg1, used1 = compile_exp s1 l_end1 in
+      let prg2, used2 = compile_exp s2 end_label in
       prg1 @ (if used1 then [LABEL l_end1] else []) @ prg2, used2
     | Stmt.Read x -> [READ; ST x], false
     | Stmt.Write e -> expr e @ [WRITE], false
@@ -116,13 +116,13 @@ let rec compile_exp stmt end_label =
     | Stmt.Skip -> [], false
     | Stmt.If (e, s1, s2) ->
       let l_else = label_generator#generate in
-      let if_prg, used1 = compile_block s1 end_label in
-      let else_prg, used2 = compile_block s2 end_label in
+      let if_prg, used1 = compile_exp s1 end_label in
+      let else_prg, used2 = compile_exp s2 end_label in
       expr e @ [CJMP ("z", l_else)] @ if_prg @ [JMP end_label] @ [LABEL l_else] @ else_prg @ [JMP end_label], true
     | Stmt.While (e, s) ->
       let l_cond = label_generator#generate in
       let l_loop = label_generator#generate in
-      let (loop_prg, _) = compile_block s l_cond in
+      let (loop_prg, _) = compile_exp s l_cond in
       [JMP l_cond; LABEL l_loop] @ loop_prg @ [LABEL l_cond] @ expr e @ [CJMP ("nz", l_loop)], false
     | Stmt.Repeat (s, e) ->
         let l_repeat = label_generator#generate in
@@ -132,7 +132,7 @@ let rec compile_exp stmt end_label =
          List.concat (List.map expr (List.rev args)) @ [CALL name], false
   and compile_stmt statement =
     let end_label = label_generator#generate in
-    let prg, used = compile_block statement end_label in
+    let prg, used = compile_exp statement end_label in
    prg @ (if used then [LABEL end_label] else []) 
   and compile_defs defs =
     List.fold_left 
