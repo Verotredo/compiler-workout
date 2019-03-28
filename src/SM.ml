@@ -128,8 +128,20 @@ let rec compile_exp stmt end_label =
         let l_repeat = label_generator#generate in
         let repeat_prg = compile s in
         [LABEL l_repeat] @ repeat_prg @ expr e @ [CJMP ("z", l_repeat)], false
-and compile stmt =
-  let end_label = label_generator#generate in
-  let prg, used = compile_exp stmt end_label in
-  prg @ (if used then [LABEL end_label] else [])
+    | Stmt.Call (name, args) ->
+         List.concat (List.map expr (List.rev args)) @ [CALL name], false
+  and compile_stmt statement =
+    let end_label = label_generator#generate in
+    let prg, used = compile_block statement end_label in
+   prg @ (if used then [LABEL end_label] else []) 
+  and compile_defs defs =
+    List.fold_left 
+    (fun prev (name, (args, locals, body)) -> 
+     let compiled_body = compile_stmt body in 
+      prev @ [LABEL name] @ [BEGIN (args, locals)] @ compiled_body @ [END]
+   )   []   defs
+  and compile (defs, stmt) = 
+    let compiled_stmt = compile_stmt stmt in
+    let compiled_defs = compile_defs defs in
+    compiled_stmt @ [END] @ compiled_defs
 
