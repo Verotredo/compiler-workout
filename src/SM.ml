@@ -10,8 +10,11 @@ open Language
 (* load a variable to the stack    *) | LD    of string
 (* store a variable from the stack *) | ST    of string
 (* a label                         *) | LABEL of string
-(* unconditional jump              *) | JMP   of string                                                                                                                
-(* conditional jump                *) | CJMP  of string * string with show
+(* unconditional jump              *) | JMP   of string  
+(* conditional jump                *) | CJMP  of string * string
+(* begins procedure definition     *) | BEGIN of string list * string list
+(* end procedure definition        *) | END
+(* calls a procedure               *) | CALL  of string with show
                                                    
 (* The type for the stack machine program *)                                                               
 type prg = insn list
@@ -57,6 +60,7 @@ let run p i =
   | _ :: tl         -> make_map m tl
   in
   let m = make_map M.empty p in
+
   if (1 == 0) then
   List.fold_left (fun () pr ->
                   Printf.printf "%s\n" (GT.transform(insn) (new @insn[show]) () pr)) () p
@@ -111,3 +115,4 @@ and compile stmt =
   let end_label = label_generator#generate in
   let prg, used = compile_block stmt end_label in
   prg @ (if used then [LABEL end_label] else [])
+

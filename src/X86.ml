@@ -43,7 +43,6 @@ type instr =
 (* a label in the code                                  *) | Label of string
 (* a conditional jump                                   *) | CJmp  of string * string
 (* a non-conditional jump                               *) | Jmp   of string
-
 (* Instruction printer *)
 let show instr =
   let binop = function
@@ -155,6 +154,9 @@ let rec compile env scode = match scode with
   in
   let env, asm' = compile env scode' in
   env, asm @ asm'  
+(* A set of strings *)           
+module S = Set.Make (String)
+
 
 (* Environment implementation *)
 class env =
@@ -236,4 +238,5 @@ let build stmt name =
   Printf.fprintf outf "%s" (genasm stmt);
   close_out outf;
   let inc = try Sys.getenv "RC_RUNTIME" with _ -> "../runtime" in
+
 Sys.command (Printf.sprintf "gcc -m32 -o %s %s/runtime.o %s.s" name inc name)
