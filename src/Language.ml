@@ -1,12 +1,10 @@
-<<<<<<< HEAD
+
 let counter = ref 0;;
 
 let next_var() = let result = "__repeat_variable__" ^ string_of_int !counter in
                      counter := !counter + 1;
                      result;;
 
-=======
->>>>>>> upstream/hw6
 (* Opening a library for generic programming (https://github.com/dboulytchev/GT).
    The library provides "@type ..." syntax extension and plugins like show, etc.
 *)
@@ -14,10 +12,8 @@ open GT
 
 (* Opening a library for combinator-based syntax analysis *)
 open Ostap.Combinators
-<<<<<<< HEAD
 open Ostap
        
-=======
 
 (* States *)
 module State =
@@ -48,8 +44,7 @@ module State =
     let drop_scope st st' = {st' with g = st.g}
 
   end
-    
->>>>>>> upstream/hw6
+
 (* Simple expressions: syntax and semantics *)
 module Expr =
   struct
@@ -192,7 +187,13 @@ module Stmt =
           if (Expr.eval u_state cond) != 0
             then updated
             else eval updated stmt
-
+      | Call (name, args) ->
+          let (arg_names, locals, body) = env#definition name in
+          let args = List.combine arg_names (List.map (Expr.eval st) args) in
+          let state = State.push_scope st (arg_names @ locals) in
+          let fun_env_w_args = List.fold_left (fun st (name, value) -> State.update name value state) state args in
+          let (new_st, input, output) = eval env (fun_env_w_args,input, output) body in
+              (State.drop_scope new_st state, input, output)
     (* Statement parser *)
     ostap (
       parse: state:stmt ";" rest:parse { Seq (state, rest) } | stmt;
@@ -224,7 +225,13 @@ module Definition =
     type t = string * (string list * string list * Stmt.t)
 
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      parse: "fun" name:IDENT "(" args:(IDENT)* ")" local:(%"local" (IDENT)*)? "{" body:!(Stmt.parse) "}"
+      {
+          let local = match local with
+          | Some x -> x
+          | _ -> [] in
+          name, (args, local, body)
+      }
     )
 
   end
