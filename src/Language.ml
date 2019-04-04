@@ -131,7 +131,7 @@ module Expr =
       
       primary:
         n:DECIMAL {Const n}
-      | x:IDENT   s: ( "(" args: !(Util.list0)[parse] ")" {Call (x, args)} | empty {Var x}) {s}
+      | x:IDENT   {Const x}
       | -"(" parse -")"
     )
     
