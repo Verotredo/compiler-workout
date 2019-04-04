@@ -202,8 +202,6 @@ let rec eval env ((st, i, o, r) as conf) k stmt =
       | x:IDENT 
         assignmentOrCall: (
           ":=" e:!(Expr.parse)    {Assign (x, e)}
-          | "(" args:!(Util.list0)[Expr.parse] ")" {Call (x, args)}
-        ) {assignmentOrCall}
       | %"skip"                         {Skip}
       | %"if" condition: !(Expr.parse) %"then" action:parse 
         elIfActions:(%"elif" !(Expr.parse) %"then" parse)*
