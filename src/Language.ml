@@ -82,31 +82,30 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)                                                       
-    let to_func op =
-      let bti   = function true -> 1 | _ -> 0 in
-      let itb b = b <> 0 in
-      let (|>) f g   = fun x y -> f (g x y) in
-      match op with
-      | "+"  -> (+)
-      | "-"  -> (-)
-      | "*"  -> ( * )
-      | "/"  -> (/)
-      | "%"  -> (mod)
-      | "<"  -> bti |> (< )
-      | "<=" -> bti |> (<=)
-      | ">"  -> bti |> (> )
-      | ">=" -> bti |> (>=)
-      | "==" -> bti |> (= )
-      | "!=" -> bti |> (<>)
-      | "&&" -> fun x y -> bti (itb x && itb y)
-      | "!!" -> fun x y -> bti (itb x || itb y)
-      | _    -> failwith (Printf.sprintf "Unknown binary operator %s" op)    
-    
-    let rec eval st expr =      
-      match expr with
-      | Const n -> n
-      | Var   x -> State.eval st x
-      | Binop (op, x, y) -> to_func op (eval st x) (eval st y)
+    let rec eval state expr = match expr with
+      | Var v -> State.eval state v
+      | Const c -> c
+      | Binop (op, expr1, expr2) ->
+        let e1 = eval state expr1 in
+        let e2 = eval state expr2 in
+        let numericbool num_to_bool = if num_to_bool != 0 then true else false in
+        let boolnumeric bool_to_num = if bool_to_num then 1 else 0 in
+        match op with
+        | "+" -> (e1 + e2)
+        | "-" -> (e1 - e2)
+        | "*" -> (e1 * e2)
+        | "/" -> (e1 / e2)
+        | "%" -> (e1 mod e2)
+        | ">" -> boolnumeric (e1 > e2)
+        | ">=" -> boolnumeric (e1 >= e2)
+        | "<" -> boolnumeric (e1 < e2)
+        | "<=" -> boolnumeric (e1 <= e2)
+        | "==" -> boolnumeric (e1 == e2)
+        | "!=" -> boolnumeric (e1 != e2)
+        | "!!" -> boolnumeric (numericbool e1 || numericbool e2)
+        | "&&" -> boolnumeric (numericbool e1 && numericbool e2)
+        | _ -> failwith "Error!"
+     
 
     (* Expression parser. You can use the following terminals:
 
@@ -119,14 +118,14 @@ module Expr =
 	  !(Ostap.Util.expr 
              (fun x -> x)
 	     (Array.map (fun (a, s) -> a, 
-                           List.map  (fun s -> ostap(- $(s)), (fun x y -> Binop (s, x, y))) s
-                        ) 
+           List.map  (fun s -> ostap(- $(s)), (fun x y -> Binop (s, x, y))) s
+               ) 
               [|                
-		`Lefta, ["!!"];
-		`Lefta, ["&&"];
-		`Nona , ["=="; "!="; "<="; "<"; ">="; ">"];
-		`Lefta, ["+" ; "-"];
-		`Lefta, ["*" ; "/"; "%"];
+		        `Lefta, ["!!"];
+		        `Lefta, ["&&"];
+		        `Nona , ["=="; "!="; "<="; "<"; ">="; ">"];
+		        `Lefta, ["+" ; "-"];
+		        `Lefta, ["*" ; "/"; "%"];
               |] 
 	     )
 	     primary);
@@ -163,55 +162,49 @@ module Stmt =
        Takes a configuration and a statement, and returns another configuration
     *)
 
-        let rec eval conf stmt =
-      let (st, i, o) = conf in
-      match stmt with
-      | Read(var) -> (match i with
-        | [] -> failwith (Printf.sprintf "Reached EOF")
-        | head :: tail -> (Expr.update var head st, tail, o))
-      | Write(expr) -> (st, i, o @ [Expr.eval st expr])
-      | Assign(var, expr) -> (Expr.update var (Expr.eval st expr) st, i, o)
-      | Seq(stmt1, stmt2) -> eval (eval conf stmt1) stmt2
-      | Skip -> conf
-      | If (cond, st1, st2) ->
-          if (Expr.eval st cond) != 0 
-            then (eval conf st1)
-            else (eval conf st2)
-      | While (cond, state) ->
-          if (Expr.eval st cond) != 0
-            then let updated = (eval conf state) in eval updated stmt
-            else conf
-      |  Repeat (state, cond) ->
-          let updated = (eval conf state) in
-          let (u_state, u_inp, u_out) = updated in 
-          if (Expr.eval u_state cond) != 0
-            then updated
-            else eval updated stmt
-      | Call (name, args) ->
-          let (arg_names, locals, body) = env#definition name in
-          let args = List.combine arg_names (List.map (Expr.eval st) args) in
-          let state = State.push_scope st (arg_names @ locals) in
-          let fun_env_w_args = List.fold_left (fun st (name, value) -> State.update name value state) state args in
-          let (new_st, input, output) = eval env (fun_env_w_args,input, output) body in
-              (State.drop_scope new_st state, input, output)
+let rec eval env (state, input, output) st = 
+      match st with
+      | Assign (x, e) -> (State.update x (Expr.eval state e) state, input, output)
+      | Read x -> 
+        (match input with 
+        | z::i -> (State.update x z state, i, output)
+        | [] -> failwith "input empty")
+      | Write e -> (state, input, output @ [(Expr.eval state e)])
+      | Seq (left_st, right_st) -> (eval env (eval env (state, input, output) left_st) right_st)
+      | Skip -> (state, input, output)
+      | If (e, s1, s2) -> if Expr.eval state e != 0 then eval env (state, input, output) s1 else eval env (state, input, output) s2
+      | While  (e, s) -> if Expr.eval state e != 0 then eval env (eval env (state, input, output) s) st else (state, input, output)
+      | Repeat (e, s) -> 
+        let (state', input', output') = eval env (state, input, output) s in
+        if Expr.eval state' e == 0 then eval env (state', input', output') st else (state', input', output')
+      | Call (f, e)  ->
+        let args, locals, body = env#definition f
+        in let rec zip = function
+        | x::xs, y::ys -> (x, y) :: zip (xs, ys)
+        | [], []       -> []
+        in let assign_arg st1 (x, e) = State.update x (Expr.eval state e) st1
+        in let withArgs = List.fold_left assign_arg (State.enter state @@ args @ locals) @@ zip (args, e)
+        in let state', input, output = eval env (withArgs, input, output) body
+        in State.leave state state', input, output
+                                
     (* Statement parser *)
     ostap (
-      parse: state:stmt ";" rest:parse { Seq (state, rest) } | stmt;
-      stmt: 
-        "read" "(" name:IDENT ")" { Read name } 
-        | "write" "(" expr:!(Expr.expr) ")" { Write expr } 
-        | name:IDENT ":=" expr:!(Expr.expr) { Assign (name, expr) }
-        | "skip" { Skip }
-        | "if" cond:!(Expr.expr) "then" st1:parse st2:elsif { If (cond, st1, st2) }
-        | "while" cond:!(Expr.expr) "do" st:parse "od" { While (cond, st) }
-        | "repeat" state:parse "until" cond:!(Expr.expr) { Repeat (state, cond) }
-        | "for" init:parse "," cond:!(Expr.expr) "," upd:parse "do" state:parse "od" { Seq (init, While (cond, Seq (state, upd))) };
-
-      elsif:
-        "fi" { Skip }
-        | "else" state:parse "fi" { state }
-        | "elif" cond:!(Expr.expr) "then" st1:parse st2:elsif{ If (cond, st1, st2) }
-    ) 
+      parse: seq | stmt;
+       stmt: read | write | assign | if_ | while_ | for_ | repeat_ | skip;
+       read: "read" -"(" x:IDENT -")" { Read x };
+       write: "write" -"(" e:!(Expr.parse) -")" { Write e };
+       assign: x:IDENT -":=" e:!(Expr.parse) { Assign (x, e) };
+       if_: "if" e:!(Expr.parse) "then" s:parse "fi" {If (e, s, Skip)} 
+          | "if" e:!(Expr.parse) "then" s1:parse else_elif:else_or_elif "fi" {If (e, s1, else_elif)};
+       else_or_elif: else_ | elif_;
+       else_: "else" s:parse {s};
+       elif_: "elif" e:!(Expr.parse) "then" s1:parse s2:else_or_elif {If (e, s1, s2)};
+       while_: "while" e:!(Expr.parse) "do" s:parse "od" {While (e, s)};
+       for_: "for" init:parse "," e:!(Expr.parse) "," s1:parse "do" s2:parse "od" {Seq (init, While (e, Seq(s2, s1)))};
+       repeat_: "repeat" s:parse "until" e:!(Expr.parse) {Repeat (e, s)};
+       skip: "skip" {Skip};
+       seq: left_st:stmt -";" right_st:parse { Seq (left_st, right_st) }
+    )
       
   end
 

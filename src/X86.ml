@@ -84,76 +84,114 @@ open SM
    of x86 instructions
 *)
 
-let rec compile env scode = match scode with
-| [] -> env, []
-| instr :: scode' ->
-  let env, asm = match instr with
-    | CONST x ->
-      let s, env = env#allocate in
-      env, [ Mov(L x, s)]
-    | READ ->
-      let s, env = env#allocate in
-      env, [ Call "Lread"; Mov (eax, s)]
-    | WRITE ->
-      let s, env = env#pop in
-      env, [ Push s; Call "Lwrite"; Pop eax]
-    | LD x ->
-      let s, env = (env#global x)#allocate in
-      env, [Mov(M (env#loc x), eax);
-            Mov(eax, s)]
-    | ST x ->
-      let s, env = (env#global x)#pop in
-      env
-    | BINOP op -> 
-      let rhs, lhs, env = env#pop2 in
-      let cmp suff = env#push lhs, [Mov(rhs, edx);
-                                    Mov(L 0, eax);
-                                    Binop ("cmp", edx, lhs);
-                                    Set(suff, "%al");
-                                    Mov(eax, lhs)]
-      in
-      let logical op = env#push lhs, [Mov(L 0, eax);
-                                      Mov(L 0, edx);
-                                      Binop("cmp", L 0, lhs);
-                                      Set("ne", "%al");
-                                      Binop("cmp", L 0, rhs);
-                                      Set("ne", "%dl");
-                                      Binop(op, eax, edx);
-                                      Mov(edx, lhs)]
-      in
-      let env, instructions = match op with
-       | "+" -> env#push lhs, [Mov(rhs, eax); Binop ("+", eax, lhs)]
-       | "-" -> env#push lhs, [Mov(rhs, eax); Binop ("-", eax, lhs)]
-       | "*" -> env#push lhs, [Mov(lhs, eax);
-                               Binop ("*", rhs, eax); 
-                               Mov(eax, lhs)]
-       | "/" ->
-         let s, env = env#allocate in
-         env, [Mov (lhs, eax); Cltd; IDiv rhs; Mov(eax, s)]
-       | "%" ->
-         let s, env = env#allocate in
-         env, [Mov (lhs, eax); Cltd; IDiv rhs; Mov(edx, s)]
-       | "<" ->  cmp "l"
-       | ">" ->  cmp "g"
-       | "<=" -> cmp "le"
-       | ">=" -> cmp "ge"
-       | "==" -> cmp "e"
-       | "!=" -> cmp "ne"
-       | "&&" -> logical "&&"
-       | "!!" -> logical "!!"
-       | _ -> failwith (Printf.sprintf "Unsupported binary operator %s" op)
-      in
-      env, 
-    | LABEL(l) ->
-      env, [Label l]
-    | JMP(l) ->
-      env, [Jmp l]
-    | CJMP(jumpOnZero, l) ->
-      let s, env = env#pop in
-      env, Binop("cmp", L 0, s); CJmp(z, l)]
+let compile env code =
+  let suffix = function
+  | "<"  -> "l"
+  | "<=" -> "le"
+  | "==" -> "e"
+  | "!=" -> "ne"
+  | ">=" -> "ge"
+  | ">"  -> "g"
+  | _    -> failwith "unknown operator"	
   in
-  let env, asm' = compile env scode' in
-  env, asm @ asm'  
+  let rec compile' env scode =
+    let on_stack = function S _ -> true | _ -> false in
+    match scode with
+    | [] -> env, []
+    | instr :: scode' ->
+        let env', code' =
+          match instr with
+          | READ ->
+             let s, env' = env#allocate in
+             (env', [Call "Lread"; Mov (eax, s)])               
+          | WRITE ->
+             let s, env' = env#pop in
+             (env', [Push s; Call "Lwrite"; Pop eax])
+  	  | CONST n ->
+             let s, env' = env#allocate in
+	     (env', [Mov (L n, s)])               
+	  | LD x ->
+             let s, env' = (env#global x)#allocate in
+             env',
+	     (match s with
+	      | S _ | M _ -> [Mov (M (env'#loc x), eax); Mov (eax, s)]
+	      | _         -> [Mov (M (env'#loc x), s)]
+	     )	        
+	  | ST x ->
+	     let s, env' = (env#global x)#pop in
+             env',
+             (match s with
+              | S _ | M _ -> [Mov (s, eax); Mov (eax, M (env'#loc x))]
+              | _         -> [Mov (s, M (env'#loc x))]
+	     )
+          | BINOP op ->
+	     let x, y, env' = env#pop2 in
+             env'#push y,
+             (match op with
+	      | "/" | "%" ->
+                 [Mov (y, eax);
+                  Cltd;
+                  IDiv x;
+                  Mov ((match op with "/" -> eax | _ -> edx), y)
+                 ]
+              | "<" | "<=" | "==" | "!=" | ">=" | ">" ->
+                 (match x with
+                  | M _ | S _ ->
+                     [Binop ("^", eax, eax);
+                      Mov   (x, edx);
+                      Binop ("cmp", edx, y);
+                      Set   (suffix op, "%al");
+                      Mov   (eax, y)
+                     ]
+                  | _ ->
+                     [Binop ("^"  , eax, eax);
+                      Binop ("cmp", x, y);
+                      Set   (suffix op, "%al");
+                      Mov   (eax, y)
+                     ]
+                 )
+              | "*" ->
+                 if on_stack x && on_stack y 
+		 then [Mov (y, eax); Binop (op, x, eax); Mov (eax, y)]
+                 else [Binop (op, x, y)]
+	      | "&&" ->
+		 [Mov   (x, eax);
+		  Binop (op, x, eax);
+		  Mov   (L 0, eax);
+		  Set   ("ne", "%al");
+                  
+		  Mov   (y, edx);
+		  Binop (op, y, edx);
+		  Mov   (L 0, edx);
+		  Set   ("ne", "%dl");
+                  
+                  Binop (op, edx, eax);
+		  Set   ("ne", "%al");
+                  
+		  Mov   (eax, y)
+                 ]		   
+	      | "!!" ->
+		 [Mov   (y, eax);
+		  Binop (op, x, eax);
+                  Mov   (L 0, eax);
+		  Set   ("ne", "%al");
+		  Mov   (eax, y)
+                 ]		   
+	      | _   ->
+                 if on_stack x && on_stack y 
+                 then [Mov   (x, eax); Binop (op, eax, y)]
+                 else [Binop (op, x, y)]
+             )
+          | LABEL s     -> env, [Label s]
+	  | JMP   l     -> env, [Jmp l]
+          | CJMP (s, l) ->
+              let x, env = env#pop in
+              env, [Binop ("cmp", L 0, x); CJmp  (s, l)]
+        in
+        let env'', code'' = compile' env' scode' in
+	env'', code' @ code''
+  in
+  compile' env code
 (* A set of strings *)           
 module S = Set.Make (String)
 
