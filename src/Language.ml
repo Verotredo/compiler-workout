@@ -131,7 +131,7 @@ module Expr =
       
       primary:
         n:DECIMAL {Const n}
-      | x:IDENT   {Const x}
+      | x:IDENT   s: ( "(" args: !(Util.list0)[parse] ")" {Call (x, args)} | empty {Var x}) {s}
       | -"(" parse -")"
     )
     
@@ -199,7 +199,11 @@ let rec eval env ((st, i, o, r) as conf) k stmt =
       stmt:
         "read" "(" x:IDENT ")"          {Read x}
       | "write" "(" e:!(Expr.parse) ")" {Write e}
-      | x:IDENT ":=" e:!(Expr.parse)    {Assign (x, e)}
+      | x:IDENT 
+        assignmentOrCall: (
+          ":=" e:!(Expr.parse)    {Assign (x, e)}
+          | "(" args:!(Util.list0)[Expr.parse] ")" {Call (x, args)}
+        ) {assignmentOrCall}
       | %"skip"                         {Skip}
       | %"if" condition: !(Expr.parse) %"then" action:parse 
         elIfActions:(%"elif" !(Expr.parse) %"then" parse)*
