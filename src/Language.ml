@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 let counter = ref 0;;
 
@@ -5,16 +6,24 @@ let next_var() = let result = "__repeat_variable__" ^ string_of_int !counter in
                      counter := !counter + 1;
                      result;;
 
+=======
+>>>>>>> upstream/hw7
 (* Opening a library for generic programming (https://github.com/dboulytchev/GT).
    The library provides "@type ..." syntax extension and plugins like show, etc.
 *)
 open GT
 
 (* Opening a library for combinator-based syntax analysis *)
+<<<<<<< HEAD
 open Ostap.Combinators
 open Ostap
        
 
+=======
+open Ostap
+open Combinators
+                         
+>>>>>>> upstream/hw7
 (* States *)
 module State =
   struct
@@ -38,6 +47,7 @@ module State =
     let eval s x = (if List.mem x s.scope then s.l else s.g) x
 
     (* Creates a new scope, based on a given state *)
+<<<<<<< HEAD
     let push_scope st xs = {empty with g = st.g; scope = xs}
 
     (* Drops a scope *)
@@ -45,6 +55,15 @@ module State =
 
   end
 
+=======
+    let enter st xs = {empty with g = st.g; scope = xs}
+
+    (* Drops a scope *)
+    let leave st st' = {st' with g = st.g}
+
+  end
+    
+>>>>>>> upstream/hw7
 (* Simple expressions: syntax and semantics *)
 module Expr =
   struct
@@ -55,7 +74,9 @@ module Expr =
     @type t =
     (* integer constant *) | Const of int
     (* variable         *) | Var   of string
-    (* binary operator  *) | Binop of string * t * t with show
+    (* binary operator  *) | Binop of string * t * t
+    (* function call    *) | Call  of string * t list with show
+
 
     (* Available binary operators:
         !!                   --- disjunction
@@ -64,6 +85,7 @@ module Expr =
         +, -                 --- addition, subtraction
         *, /, %              --- multiplication, division, reminder
     *)
+<<<<<<< HEAD
                                                             
     (* State: a partial map from variables to integer values. *)
     type state = string -> int 
@@ -75,7 +97,9 @@ module Expr =
       to value v and returns the new state.
     *)
     let update x v s = fun y -> if x = y then v else s y
-
+    (* The type of configuration: a state, an input stream, an output stream, an optional value *)
+    type config = State.t * int list * int list * int option
+     
     (* Expression evaluator
          val eval : state -> t -> int
  
@@ -151,7 +175,9 @@ module Stmt =
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
+<<<<<<< HEAD
         (* loop with a post-condition       *) | Repeat of Expr.t * t
+        (* return statement                 *) | Return of Expr.t option
     (* call a procedure                 *) | Call   of string * Expr.t list with show
 
     (* The type of configuration: a state, an input stream, an output stream *)
@@ -209,7 +235,6 @@ let rec eval env (state, input, output) st =
   end
 
 
-
 (* Function and procedure definitions *)
 module Definition =
   struct
@@ -242,9 +267,21 @@ type t = Definition.t list * Stmt.t
 *)
 let eval (defs, body) i =
   let module M = Map.Make (String) in
-  let m        = List.fold_left (fun m ((name, _) as def) -> M.add name def m) M.empty defs in  
-  let _, _, o  = Stmt.eval (object method definition f = snd @@ M.find f m end) (State.empty, i, []) body in o
+  let m          = List.fold_left (fun m ((name, _) as def) -> M.add name def m) M.empty defs in  
+  let _, _, o, _ =
+    Stmt.eval
+      (object
+         method definition env f args (st, i, o, r) =                                                                      
+           let xs, locs, s      =  snd @@ M.find f m in
+           let st'              = List.fold_left (fun st (x, a) -> State.update x a st) (State.enter st (xs @ locs)) (List.combine xs args) in
+           let st'', i', o', r' = Stmt.eval env (st', i, o, r) Stmt.Skip s in
+           (State.leave st'' st, i', o', r')
+       end)
+      (State.empty, i, [], None)
+      Stmt.Skip
+      body
+  in
+  o
 
 (* Top-level parser *)
 let parse = ostap (!(Definition.parse)* !(Stmt.parse))
-

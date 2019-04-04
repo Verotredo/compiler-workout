@@ -15,7 +15,8 @@ open Language
 (* begins procedure definition     *) | BEGIN of string list * string list
 (* end procedure definition        *) | END 
 (* calls a procedure               *) | CALL  of string with show
-                                                   
+(* returns from a function         *) | RET   of bool with show
+
 (* The type for the stack machine program *)                                                               
 type prg = insn list
 

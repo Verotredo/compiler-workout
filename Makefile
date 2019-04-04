@@ -1,4 +1,3 @@
-
 SHELL := /bin/bash
 
 .PHONY: all regression
