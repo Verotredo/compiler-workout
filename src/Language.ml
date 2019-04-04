@@ -151,7 +151,7 @@ module Stmt =
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
-        (* loop with a post-condition       *) | Repeat of t * Expr.t
+        (* loop with a post-condition       *) | Repeat of Expr.t * t
     (* call a procedure                 *) | Call   of string * Expr.t list with show
 
     (* The type of configuration: a state, an input stream, an output stream *)
