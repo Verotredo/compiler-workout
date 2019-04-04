@@ -1,29 +1,12 @@
-<<<<<<< HEAD
-
-let counter = ref 0;;
-
-let next_var() = let result = "__repeat_variable__" ^ string_of_int !counter in
-                     counter := !counter + 1;
-                     result;;
-
-=======
->>>>>>> upstream/hw7
 (* Opening a library for generic programming (https://github.com/dboulytchev/GT).
    The library provides "@type ..." syntax extension and plugins like show, etc.
 *)
 open GT
 
 (* Opening a library for combinator-based syntax analysis *)
-<<<<<<< HEAD
-open Ostap.Combinators
-open Ostap
-       
-
-=======
 open Ostap
 open Combinators
                          
->>>>>>> upstream/hw7
 (* States *)
 module State =
   struct
@@ -47,15 +30,6 @@ module State =
     let eval s x = (if List.mem x s.scope then s.l else s.g) x
 
     (* Creates a new scope, based on a given state *)
-<<<<<<< HEAD
-    let push_scope st xs = {empty with g = st.g; scope = xs}
-
-    (* Drops a scope *)
-    let drop_scope st st' = {st' with g = st.g}
-
-  end
-
-=======
     let enter st xs = {empty with g = st.g; scope = xs}
 
     (* Drops a scope *)
@@ -63,7 +37,6 @@ module State =
 
   end
     
->>>>>>> upstream/hw7
 (* Simple expressions: syntax and semantics *)
 module Expr =
   struct
@@ -85,7 +58,6 @@ module Expr =
         +, -                 --- addition, subtraction
         *, /, %              --- multiplication, division, reminder
     *)
-<<<<<<< HEAD
                                                             
     (* State: a partial map from variables to integer values. *)
     type state = string -> int 
@@ -106,31 +78,34 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)                                                       
-    let rec eval state expr = match expr with
-      | Var v -> State.eval state v
-      | Const c -> c
-      | Binop (op, expr1, expr2) ->
-        let e1 = eval state expr1 in
-        let e2 = eval state expr2 in
-        let numericbool num_to_bool = if num_to_bool != 0 then true else false in
-        let boolnumeric bool_to_num = if bool_to_num then 1 else 0 in
-        match op with
-        | "+" -> (e1 + e2)
-        | "-" -> (e1 - e2)
-        | "*" -> (e1 * e2)
-        | "/" -> (e1 / e2)
-        | "%" -> (e1 mod e2)
-        | ">" -> boolnumeric (e1 > e2)
-        | ">=" -> boolnumeric (e1 >= e2)
-        | "<" -> boolnumeric (e1 < e2)
-        | "<=" -> boolnumeric (e1 <= e2)
-        | "==" -> boolnumeric (e1 == e2)
-        | "!=" -> boolnumeric (e1 != e2)
-        | "!!" -> boolnumeric (numericbool e1 || numericbool e2)
-        | "&&" -> boolnumeric (numericbool e1 && numericbool e2)
-        | _ -> failwith "Error!"
+    let to_func op =
+       let bti   = function true -> 1 | _ -> 0 in
+       let itb b = b <> 0 in
+      let (|>) f g   = fun x y -> f (g x y) in
+       match op with
+       | "+"  -> (+)
+       | "-"  -> (-)
+       | "*"  -> ( * )
+       | "/"  -> (/)
+       | "%"  -> (mod)
+       | "<"  -> bti |> (< )
+       | "<=" -> bti |> (<=)
+       | ">"  -> bti |> (> )
+       | ">=" -> bti |> (>=)
+       | "==" -> bti |> (= )
+       | "!=" -> bti |> (<>)
+       | "&&" -> fun x y -> bti (itb x && itb y)
+       | "!!" -> fun x y -> bti (itb x || itb y)
+       | _    -> failwith (Printf.sprintf "Unknown binary operator %s" op)
      
-
+    let rec eval env ((st, i, o, r) as conf) expr = match expr with
+       | Const n -> (st, i, o, Some n)
+       | Var   x -> (st, i, o, Some(State.eval st x))
+       | Binop (op, x, y) -> let (_, _, _, Some firstArg) as conf = eval env conf x in
+         let (st, i, o, Some secondArg) = eval env conf y 
+         in (st, i, o, Some (to_func op firstArg secondArg)) 
+       | Call (name, args) -> let computedArgs, conf = List.fold_left (fun (acc, conf) arg -> let (_, _, _, Some compArg) as conf = eval env conf arg in compArg::acc, conf) ([], conf) args in
+         env#definition env name (List.rev computedArgs) conf
     (* Expression parser. You can use the following terminals:
 
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
@@ -156,7 +131,7 @@ module Expr =
       
       primary:
         n:DECIMAL {Const n}
-      | x:IDENT   {Var x}
+      | x:IDENT   s: ( "(" args: !(Util.list0)[parse] ")" {Call (x, args)} | empty {Var x}) {s}
       | -"(" parse -")"
     )
     
@@ -175,9 +150,8 @@ module Stmt =
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
-<<<<<<< HEAD
-        (* loop with a post-condition       *) | Repeat of Expr.t * t
-        (* return statement                 *) | Return of Expr.t option
+    (* loop with a post-condition       *) | Repeat of t * Expr.t
+    (* return statement                 *) | Return of Expr.t option
     (* call a procedure                 *) | Call   of string * Expr.t list with show
 
     (* The type of configuration: a state, an input stream, an output stream *)
@@ -187,51 +161,60 @@ module Stmt =
          val eval : config -> t -> config
        Takes a configuration and a statement, and returns another configuration
     *)
+let evalSeq x stmt = match stmt with
+    | Skip -> x
+    | y    -> Seq (x, y)
 
-let rec eval env (state, input, output) st = 
-      match st with
-      | Assign (x, e) -> (State.update x (Expr.eval state e) state, input, output)
-      | Read x -> 
-        (match input with 
-        | z::i -> (State.update x z state, i, output)
-        | [] -> failwith "input empty")
-      | Write e -> (state, input, output @ [(Expr.eval state e)])
-      | Seq (left_st, right_st) -> (eval env (eval env (state, input, output) left_st) right_st)
-      | Skip -> (state, input, output)
-      | If (e, s1, s2) -> if Expr.eval state e != 0 then eval env (state, input, output) s1 else eval env (state, input, output) s2
-      | While  (e, s) -> if Expr.eval state e != 0 then eval env (eval env (state, input, output) s) st else (state, input, output)
-      | Repeat (e, s) -> 
-        let (state', input', output') = eval env (state, input, output) s in
-        if Expr.eval state' e == 0 then eval env (state', input', output') st else (state', input', output')
-      | Call (f, e)  ->
-        let args, locals, body = env#definition f
-        in let rec zip = function
-        | x::xs, y::ys -> (x, y) :: zip (xs, ys)
-        | [], []       -> []
-        in let assign_arg st1 (x, e) = State.update x (Expr.eval state e) st1
-        in let withArgs = List.fold_left assign_arg (State.push_scope state @@ args @ locals) @@ zip (args, e)
-        in let state', input, output = eval env (withArgs, input, output) body
-        in State.drop_scope state state', input, output
-                                
-    (* Statement parser *)
-    ostap (
-      parse: seq | stmt;
-       stmt: read | write | assign | if_ | while_ | for_ | repeat_ | skip;
-       read: "read" -"(" x:IDENT -")" { Read x };
-       write: "write" -"(" e:!(Expr.parse) -")" { Write e };
-       assign: x:IDENT -":=" e:!(Expr.parse) { Assign (x, e) };
-       if_: "if" e:!(Expr.parse) "then" s:parse "fi" {If (e, s, Skip)} 
-          | "if" e:!(Expr.parse) "then" s1:parse else_elif:else_or_elif "fi" {If (e, s1, else_elif)};
-       else_or_elif: else_ | elif_;
-       else_: "else" s:parse {s};
-       elif_: "elif" e:!(Expr.parse) "then" s1:parse s2:else_or_elif {If (e, s1, s2)};
-       while_: "while" e:!(Expr.parse) "do" s:parse "od" {While (e, s)};
-       for_: "for" init:parse "," e:!(Expr.parse) "," s1:parse "do" s2:parse "od" {Seq (init, While (e, Seq(s2, s1)))};
-       repeat_: "repeat" s:parse "until" e:!(Expr.parse) {Repeat (e, s)};
-       skip: "skip" {Skip};
-       seq: left_st:stmt -";" right_st:parse { Seq (left_st, right_st) }
-    )
+let rec eval env ((st, i, o, r) as conf) k stmt = 
+      match stmt with
+      | Read    x       -> eval env (match i with z::i' -> (State.update x z st, i', o, r) | _ -> failwith "Unexpected end of input") Skip k
+      | Write   e       -> eval env (let (st, i, o, Some x) = Expr.eval env conf e in (st, i, o @ [x], r)) Skip k
+      | Assign (x, e)   -> eval env (let (st, i, o, Some rr) = Expr.eval env conf e in (State.update x rr st, i, o, r)) Skip k
+      | Seq    (s1, s2) -> eval env conf (evalSeq s2 k) s1
+      | Skip -> match k with Skip -> conf | something -> eval env conf Skip k
+      | If (expr, thenIf, elseIf) -> let (_, _, _, Some x) as conf = Expr.eval env conf expr in if x <> 0 then (eval env conf k thenIf) else (eval env conf k elseIf)
+      | While (expr, loopStmt) -> let (_, _, _, Some x) as conf = Expr.eval env conf expr in
+        if (x = 0) then eval env conf Skip k else eval env conf (evalSeq stmt k) loopStmt
+      | Repeat (loopStmt, expr) ->  eval env conf (evalSeq (While (Expr.Binop ("==", expr, Expr.Const 0), loopStmt)) k) loopStmt
+      | Call (f, args) -> eval env (Expr.eval env conf (Expr.Call (f, args))) k Skip
+      | Return res -> match res with
+        | None -> (st, i, o, None)
+        | Some resExpr -> Expr.eval env conf resExpr
+
+    let rec parseElIfActions elIfActions elseAction =  match elIfActions with
+    | [] -> elseAction
+    | (condition, action)::tailElIfActions -> If (condition, action, parseElIfActions tailElIfActions elseAction)
+
+    let parseElse elIfActions elseAction = 
+      let elseActionParsed = match elseAction with
+      | None -> Skip
+      | Some action -> action
+    in parseElIfActions elIfActions elseActionParsed
+     
+     ostap (
+      parse:
+        s:stmt ";" ss:parse {Seq (s, ss)}
+      | stmt;
       
+      stmt:
+        "read" "(" x:IDENT ")"          {Read x}
+      | "write" "(" e:!(Expr.parse) ")" {Write e}
+      | x:IDENT 
+        assignmentOrCall: (
+          ":=" e:!(Expr.parse)    {Assign (x, e)}
+          | "(" args:!(Util.list0)[Expr.parse] ")" {Call (x, args)}
+        ) {assignmentOrCall}
+      | %"skip"                         {Skip}
+      | %"if" condition: !(Expr.parse) %"then" action:parse 
+        elIfActions:(%"elif" !(Expr.parse) %"then" parse)*
+        elseAction:(%"else" parse)?
+        %"fi"                                              { If (condition, action, parseElse elIfActions elseAction)}
+      | %"while" condition: !(Expr.parse) %"do" action:parse %"od"  { While (condition, action) }
+      | %"repeat" action:parse %"until" condition: !(Expr.parse)    { Repeat (action, condition) }
+      | %"return" e:!(Expr.parse)? {Return e}
+      | %"for" initialize:parse "," condition: !(Expr.parse)
+        "," increment:parse %"do" action:parse %"od"             { Seq (initialize, While (condition, Seq (action, increment))) }
+    )  
   end
 
 
