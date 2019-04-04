@@ -183,9 +183,9 @@ let rec eval env (state, input, output) st =
         | x::xs, y::ys -> (x, y) :: zip (xs, ys)
         | [], []       -> []
         in let assign_arg st1 (x, e) = State.update x (Expr.eval state e) st1
-        in let withArgs = List.fold_left assign_arg (State.enter state @@ args @ locals) @@ zip (args, e)
+        in let withArgs = List.fold_left assign_arg (State.push_scope state @@ args @ locals) @@ zip (args, e)
         in let state', input, output = eval env (withArgs, input, output) body
-        in State.leave state state', input, output
+        in State.drop_scope state state', input, output
                                 
     (* Statement parser *)
     ostap (
