@@ -199,9 +199,7 @@ let rec eval env ((st, i, o, r) as conf) k stmt =
       stmt:
         "read" "(" x:IDENT ")"          {Read x}
       | "write" "(" e:!(Expr.parse) ")" {Write e}
-      | x:IDENT 
-        assignmentOrCall: (
-          ":=" e:!(Expr.parse)    {Assign (x, e)}
+      | x:IDENT ":=" e:!(Expr.parse)    {Assign (x, e)}
       | %"skip"                         {Skip}
       | %"if" condition: !(Expr.parse) %"then" action:parse 
         elIfActions:(%"elif" !(Expr.parse) %"then" parse)*
