@@ -6,13 +6,71 @@ open GT
 (* Opening a library for combinator-based syntax analysis *)
 open Ostap
 open Combinators
-                         
+
+module MyUtils =
+  struct
+
+  let initList n ~f =
+    let rec initList' i n f =
+      if i >= n then []
+      else (f i) :: (initList' (i+1) n f)
+    in initList' 0 n f
+
+  let bti   = function true -> 1 | _ -> 0
+  let itb b = b <> 0
+  let toFunc op =
+    let (|>) f g   = fun x y -> f (g x y) in
+      match op with
+      | "+"  -> (+)
+      | "-"  -> (-)
+      | "*"  -> ( * )
+      | "/"  -> (/)
+      | "%"  -> (mod)
+      | "<"  -> bti |> (< )
+      | "<=" -> bti |> (<=)
+      | ">"  -> bti |> (> )
+      | ">=" -> bti |> (>=)
+      | "==" -> bti |> (= )
+      | "!=" -> bti |> (<>)
+      | "&&" -> fun x y -> bti (itb x && itb y)
+      | "!!" -> fun x y -> bti (itb x || itb y)
+      | _    -> failwith (Printf.sprintf "Unknown binary operator %s" op)
+
+  end
+
+(* Values *)
+module Value =
+  struct
+
+    @type t = Int of int | String of string | Array of t list with show
+
+    let to_int = function 
+    | Int n -> n 
+    | _ -> failwith "int value expected"
+
+    let to_string = function 
+    | String s -> s 
+    | _ -> failwith "string value expected"
+
+    let to_array = function
+    | Array a -> a
+    | _       -> failwith "array value expected"
+
+    let of_int    n = Int    n
+    let of_string s = String s
+    let of_array  a = Array  a
+
+    let update_string s i x = String.init      (String.length s) (fun j -> if j = i then x else s.[j])
+    let update_array  a i x = MyUtils.initList (List.length a)   (fun j -> if j = i then x else List.nth a j)
+
+  end
+       
 (* States *)
 module State =
   struct
                                                                 
     (* State: global state, local state, scope variables *)
-    type t = {g : string -> int; l : string -> int; scope : string list}
+    type t = {g : string -> Value.t; l : string -> Value.t; scope : string list}
 
     (* Empty state *)
     let empty =
@@ -36,6 +94,27 @@ module State =
     let leave st st' = {st' with g = st.g}
 
   end
+
+(* Builtins *)
+module Builtin =
+  struct
+
+    let eval (st, i, o, _) args = function
+    | "read"     -> (match i with z::i' -> (st, i', o, Some (Value.of_int z)) | _ -> failwith "Unexpected end of input")
+    | "write"    -> (st, i, o @ [Value.to_int @@ List.hd args], None)
+    | "$elem"    -> let [b; j] = args in
+                    (st, i, o, let i = Value.to_int j in
+                               Some (match b with
+                                     | Value.String s -> Value.of_int @@ Char.code s.[i]
+                                     | Value.Array  a -> List.nth a i
+                               )
+                    )         
+    | "$length"  -> (st, i, o, Some (Value.of_int (match List.hd args with Value.Array a -> List.length a | Value.String s -> String.length s)))
+    | "$array"   -> (st, i, o, Some (Value.of_array args))
+    | "isArray"  -> let [a] = args in (st, i, o, Some (Value.of_int @@ match a with Value.Array  _ -> 1 | _ -> 0))
+    | "isString" -> let [a] = args in (st, i, o, Some (Value.of_int @@ match a with Value.String _ -> 1 | _ -> 0))                     
+       
+  end
     
 (* Simple expressions: syntax and semantics *)
 module Expr =
@@ -45,10 +124,15 @@ module Expr =
        notation, it came from GT. 
     *)
     @type t =
-    (* integer constant *) | Const of int
-    (* variable         *) | Var   of string
-    (* binary operator  *) | Binop of string * t * t
-    (* function call    *) | Call  of string * t list with show
+    (* integer constant   *) | Const  of int
+    (* array              *) | Array  of t list
+    (* string             *) | String of string
+    (* S-expressions      *) | Sexp   of string * t list
+    (* variable           *) | Var    of string
+    (* binary operator    *) | Binop  of string * t * t
+    (* element extraction *) | Elem   of t * t
+    (* length             *) | Length of t 
+    (* function call      *) | Call   of string * t list with show
 
     (* Available binary operators:
         !!                   --- disjunction
@@ -59,31 +143,11 @@ module Expr =
     *)
 
     (* The type of configuration: a state, an input stream, an output stream, an optional value *)
-    type config = State.t * int list * int list * int option
-
-    let bti   = function true -> 1 | _ -> 0
-    let itb b = b <> 0
-    let to_func op =
-      let (|>) f g   = fun x y -> f (g x y) in
-      match op with
-      | "+"  -> (+)
-      | "-"  -> (-)
-      | "*"  -> ( * )
-      | "/"  -> (/)
-      | "%"  -> (mod)
-      | "<"  -> bti |> (< )
-      | "<=" -> bti |> (<=)
-      | ">"  -> bti |> (> )
-      | ">=" -> bti |> (>=)
-      | "==" -> bti |> (= )
-      | "!=" -> bti |> (<>)
-      | "&&" -> fun x y -> bti (itb x && itb y)
-      | "!!" -> fun x y -> bti (itb x || itb y)
-      | _    -> failwith (Printf.sprintf "Unknown binary operator %s" op)
-
+    type config = State.t * int list * int list * Value.t option
+                                                            
     (* Expression evaluator
 
-          val eval : env -> config -> t -> config
+          val eval : env -> config -> t -> int * config
 
 
        Takes an environment, a configuration and an expresion, and returns another configuration. The 
@@ -92,21 +156,35 @@ module Expr =
            method definition : env -> string -> int list -> config -> config
 
        which takes an environment (of the same type), a name of the function, a list of actual parameters and a configuration, 
-       an returns resulting configuration
-    *)                                                       
+       an returns a pair: the return value for the call and the resulting configuration
+    *)
     let rec eval env ((st, i, o, r) as conf) expr = match expr with
-      | Const n -> (st, i, o, Some n)
-      | Var x   -> (st, i, o, Some (State.eval st x))
-      | Binop (op, x, y) -> let ((st', i', o', Some a) as conf') = eval env conf x in
-                              let (st', i', o', Some b) = eval env conf' y in
-                              (st', i', o', Some (to_func op a b))
+      | Const n  -> (st, i, o, Some (Value.of_int n))
+      | Array l  -> let (st, i, o, v) = eval_list env conf l in env#definition env "$array" v (st, i, o, None)
+      | String s -> (st, i, o, Some (Value.of_string s))
+      | Var x    -> (st, i, o, Some (State.eval st x))
+      | Binop (op, x, y) -> let ((st, i, o, Some a) as conf') = eval env conf x in
+                              let (st, i, o, Some b) = eval env conf' y in
+                              (st, i, o, Some (Value.of_int @@ MyUtils.toFunc op (Value.to_int a) (Value.to_int b)))
+      | Elem (a, i)      -> let (st, i, o, v) = eval_list env conf [a; i] in env#definition env "$elem" v (st, i, o, None)
+      | Length n         -> let (st, i, o, v) = eval_list env conf [n] in env#definition env "$length" v (st, i, o, None)
       | Call (fName, argsE) -> let (st', i', o', args) = List.fold_left (fun (st, i, o, args) e ->
                                                                           let ((st, i, o, Some r) as conf') = eval env (st, i, o, None) e in
                                                                           (st, i, o, args @ [r])
                                                                         ) (st, i, o, []) argsE in 
                                env#definition env fName args (st', i', o', None)
-
-
+    and eval_list env conf xs =
+      let vs, (st, i, o, _) =
+        List.fold_left
+          (fun (acc, conf) x ->
+             let (_, _, _, Some v) as conf = eval env conf x in
+             v::acc, conf
+          )
+          ([], conf)
+          xs
+      in
+      (st, i, o, List.rev vs)
+         
     (* Expression parser. You can use the following terminals:
 
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
@@ -128,9 +206,19 @@ module Expr =
               |] 
 	     )
 	     primary);
-      
+
       primary:
+        b:base acss:(-"[" !(parse) -"]")* l:("." %"length")?
+        {
+          let elements = List.fold_left (fun a i -> Elem (a, i)) b acss in match l with
+            | Some x -> Length elements
+            | None   -> elements
+        };
+      base:
         n:DECIMAL {Const n}
+      | s:STRING  {String (String.sub s 1 ((String.length s) - 2))}
+      | c:CHAR    {Const (Char.code c)}
+      | "[" es:!(Util.list0 parse) "]" { Array es }
       | x:IDENT opt:("(" args:!(Util.list0 parse) ")" {Call (x, args)} | empty {Var x}) {opt}
       | -"(" parse -")"
     )
@@ -142,24 +230,16 @@ module Stmt =
   struct
 
     (* The type for statements *)
-    @type t =
-    (* read into the variable           *) | Read   of string
-    (* write the value of an expression *) | Write  of Expr.t
-    (* assignment                       *) | Assign of string * Expr.t
+    type t =
+    (* assignment                       *) | Assign of string * Expr.t list * Expr.t
     (* composition                      *) | Seq    of t * t 
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
     (* loop with a post-condition       *) | Repeat of t * Expr.t
     (* return statement                 *) | Return of Expr.t option
-    (* call a procedure                 *) | Call   of string * Expr.t list with show
-      
-    let metaOp x y = match x with
-      | Skip -> y
-      | _ -> match y with
-        | Skip -> x
-        | _ -> Seq (x, y)
-                                                              
+    (* call a procedure                 *) | Call   of string * Expr.t list
+                                                                    
     (* Statement evaluator
 
          val eval : env -> config -> t -> config
@@ -167,22 +247,37 @@ module Stmt =
        Takes an environment, a configuration and a statement, and returns another configuration. The 
        environment is the same as for expressions
     *)
+
+    let update st x v is =
+      let rec update a v = function
+      | []    -> v           
+      | i::tl ->
+          let i = Value.to_int i in
+          (match a with
+           | Value.String s when tl = [] -> Value.String (Value.update_string s i (Char.chr @@ Value.to_int v))
+           | Value.Array a               -> Value.Array  (Value.update_array  a i (update (List.nth a i) v tl))
+          ) 
+      in
+      State.update x (match is with [] -> v | _ -> update (State.eval st x) v is) st
+          
+    let metaOp x y = match x with
+      | Skip -> y
+      | _ -> match y with
+        | Skip -> x
+        | _ -> Seq (x, y)
     let rec eval env ((st, i, o, r) as conf) k stmt = match stmt with
-      | Assign (x, e)              -> let (st, i, o, Some r) = Expr.eval env conf e in eval env (State.update x r st, i, o, Some r) Skip k
-      | Read x                     -> (match i with
-                                        | z::tail -> eval env (State.update x z st, tail, o, None) Skip k
-                                        | []      -> failwith "Empty input"
-                                      )
-      | Write e                    -> let (st, i, o, Some r) = Expr.eval env conf e in eval env (st, i, o @ [r], None) Skip k
+      | Assign (x, is, e)          -> let (st, i, o, is) = Expr.eval_list env conf is in
+                                      let (st, i, o, Some r) = Expr.eval env (st, i, o, None) e in
+                                      eval env (update st x r is, i, o, None) Skip k
       | Seq (stmt1, stmt2)         -> eval env conf (metaOp stmt2 k) stmt1
       | Skip                       -> (match k with
                                         | Skip -> conf
                                         | _    -> eval env conf Skip k)
       | If (e, thenStmt, elseStmt) -> let ((st, i, o, Some r) as conf') = Expr.eval env conf e in 
-                                        if Expr.itb r then eval env conf' k thenStmt 
+                                        if MyUtils.itb (Value.to_int r) then eval env conf' k thenStmt 
                                         else eval env conf' k elseStmt
       | While (e, wStmt)           -> let ((st, i, o, Some r) as conf') = Expr.eval env conf e in
-                                        if Expr.itb r then eval env conf' (metaOp stmt k) wStmt
+                                        if MyUtils.itb (Value.to_int r) then eval env conf' (metaOp stmt k) wStmt
                                         else eval env conf' Skip k
       | Repeat (ruStmt, e)         -> eval env conf (metaOp (While (Expr.Binop ("==", e, Expr.Const 0), ruStmt)) k) ruStmt
       | Call (fName, argsE)        -> eval env (Expr.eval env conf (Expr.Call (fName, argsE))) Skip k
@@ -190,14 +285,11 @@ module Stmt =
                                         | Some x -> Expr.eval env conf x
                                         | None   -> conf
                                       )
-
          
     (* Statement parser *)
     ostap (   
       simple:
-          "read" "(" x:IDENT ")"         {Read x}
-        | "write" "(" e:!(Expr.parse) ")" {Write e}
-        | x:IDENT ":=" e:!(Expr.parse)    {Assign (x, e)};
+        x:IDENT is:(-"[" !(Expr.parse) -"]")* ":=" e:!(Expr.parse) {Assign (x, is, e)};
       ifStmt:
         "if" e:!(Expr.parse) "then" thenBody:parse
 	elifBranches: (%"elif" elifE:!(Expr.parse) %"then" elifBody:!(parse))*
@@ -245,14 +337,12 @@ module Definition =
     (* The type for a definition: name, argument list, local variables, body *)
     type t = string * (string list * string list * Stmt.t)
 
-    ostap ( 
-      param: IDENT;                                     
-      parse: "fun" name:IDENT "(" params:!(Util.list0 param) ")" locals:(%"local" !(Util.list0 param))? "{" body:!(Stmt.parse)  "}"
-      {
-        let locals = match locals with
-      	  | Some x -> x
-          | None   -> [] in
-        name, (params, locals, body)
+    ostap (
+      arg  : IDENT;
+      parse: %"fun" name:IDENT "(" args:!(Util.list0 arg) ")"
+         locs:(%"local" !(Util.list arg))?
+        "{" body:!(Stmt.parse) "}" {
+        (name, (args, (match locs with None -> [] | Some l -> l), body))
       }
     )
 
@@ -275,11 +365,13 @@ let eval (defs, body) i =
   let _, _, o, _ =
     Stmt.eval
       (object
-         method definition env f args (st, i, o, r) =                                                                      
-           let xs, locs, s      =  snd @@ M.find f m in
-           let st'              = List.fold_left (fun st (x, a) -> State.update x a st) (State.enter st (xs @ locs)) (List.combine xs args) in
-           let st'', i', o', r' = Stmt.eval env (st', i, o, r) Stmt.Skip s in
-           (State.leave st'' st, i', o', r')
+         method definition env f args ((st, i, o, r) as conf) =
+           try
+             let xs, locs, s      =  snd @@ M.find f m in
+             let st'              = List.fold_left (fun st (x, a) -> State.update x a st) (State.enter st (xs @ locs)) (List.combine xs args) in
+             let st'', i', o', r' = Stmt.eval env (st', i, o, r) Stmt.Skip s in
+             (State.leave st'' st, i', o', r')
+           with Not_found -> Builtin.eval conf args f
        end)
       (State.empty, i, [], None)
       Stmt.Skip

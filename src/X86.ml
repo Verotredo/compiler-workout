@@ -1,3 +1,5 @@
+open Language
+
 (* X86 codegeneration interface *)
 
 (* The registers: *)
@@ -90,10 +92,6 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-
-let rec initImpl cnt = if cnt < 0 then [] else cnt :: initImpl (cnt - 1)
-let init cnt = List.rev (initImpl (cnt - 1))
-
 let cmpOpToAsm op = match op with
   | "<"  -> "l"
   | "<=" -> "le"
@@ -110,12 +108,6 @@ let rec compile env = function
       | CONST n  ->
         let s, env = env#allocate in
         env, [Mov (L n, s)]
-      | READ     ->
-        let s, env = env#allocate in
-        env, [Call "Lread"; Mov (eax, s)]
-      | WRITE    ->
-        let s, env = env#pop in
-        env, [Push s; Call "Lwrite"; Pop eax]
       | LD x -> let s, env' = env#allocate in
         let v = env#loc x in
         env', [Mov (v, eax); Mov (eax, s)]
@@ -150,16 +142,16 @@ let rec compile env = function
       | JMP l    -> env, [Jmp l]
       | CJMP (znz, l) -> let h, env = env#pop in env, [Binop ("cmp", L 0, h); CJmp (znz, l)]
       | CALL (fName, argsN, flag) -> 
-        let (env, args) = List.fold_left (fun (env, args) _ -> let a, env = env#pop in (env, a::args)) (env, []) (init argsN) in
+        let (env, args) = List.fold_left (fun (env, args) _ -> let a, env = env#pop in (env, a::args)) (env, []) (MyUtils.initList argsN (fun x -> x)) in
         let (env, getRes) = if flag then let (a, env) = env#allocate in env, [Mov (eax, a)]
                             else env, [] in
         env, (List.map (fun x -> Push x) args) @ [Call fName; Binop ("+", L (argsN * word_size), esp)] @ getRes
       | BEGIN (fName, params, locals) -> 
-        let pushRegs = List.map (fun x -> Push (R x)) (init num_of_regs) in
+        let pushRegs = List.map (fun x -> Push (R x)) (MyUtils.initList num_of_regs (fun x -> x)) in
         let env = env#enter fName params locals in
         env, [Push ebp; Mov (esp, ebp)] @ pushRegs @ [Binop ("-", M ("$" ^ env#lsize), esp)]
       | END ->
-        let popRegs = List.map (fun x -> Pop (R x)) (List.rev (init num_of_regs)) in 
+        let popRegs = List.map (fun x -> Pop (R x)) (List.rev (MyUtils.initList num_of_regs (fun x -> x))) in 
           let meta = [Meta (Printf.sprintf "\t.set %s, %d" env#lsize (env#allocated * word_size))] in
           env, [Label env#epilogue] @ popRegs @  [Mov (ebp, esp); Pop ebp; Ret] @ meta
       | RET flag ->
@@ -168,12 +160,12 @@ let rec compile env = function
     in
     let env, asm' = compile env code' in
     env, asm @ asm'
-                                
+
 (* A set of strings *)           
 module S = Set.Make (String)
 
 (* Environment implementation *)
-let make_assoc l = List.combine l (init (List.length l))
+let make_assoc l = List.combine l (MyUtils.initList (List.length l) (fun x -> x))
                      
 class env =
   object (self)
@@ -193,14 +185,14 @@ class env =
     (* allocates a fresh position on a symbolic stack *)
     method allocate =    
       let x, n =
-	let rec allocate' = function
-	| []                            -> ebx     , 0
-	| (S n)::_                      -> S (n+1) , n+1
-	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
+        let rec allocate' = function
+        | []                            -> R 0     , 0
+        | (S n)::_                      -> S (n+1) , n+2
+        | (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
         | (M _)::s                      -> allocate' s
-	| _                             -> S 0     , 1
-	in
-	allocate' stack
+        | _                             -> let n = List.length locals in S n, n+1
+        in
+        allocate' stack
       in
       x, {< stack_slots = max n stack_slots; stack = x::stack >}
 
@@ -235,7 +227,7 @@ class env =
     (* returns a list of live registers *)
     method live_registers =
       List.filter (function R _ -> true | _ -> false) stack
-      
+       
   end
   
 (* Generates an assembler text for a program: first compiles the program into
