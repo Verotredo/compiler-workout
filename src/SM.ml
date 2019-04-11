@@ -10,49 +10,73 @@ open Language
 (* load a variable to the stack    *) | LD    of string
 (* store a variable from the stack *) | ST    of string
 (* a label                         *) | LABEL of string
-(* unconditional jump              *) | JMP   of string  
+(* unconditional jump              *) | JMP   of string
 (* conditional jump                *) | CJMP  of string * string
-(* begins procedure definition     *) | BEGIN of string list * string list
-(* end procedure definition        *) | END 
-(* calls a procedure               *) | CALL  of string 
+(* begins procedure definition     *) | BEGIN of string * string list * string list
+(* end procedure definition        *) | END
+(* calls a function/procedure      *) | CALL  of string * int * bool
 (* returns from a function         *) | RET   of bool with show
-
+                                                   
 (* The type for the stack machine program *)                                                               
 type prg = insn list
-
-(* The type for the stack machine configuration: a stack and a configuration from statement
+                            
+(* The type for the stack machine configuration: control stack, stack and configuration from statement
    interpreter
  *)
-type config = int list * Stmt.config
+type config = (prg * State.t) list * int list * Expr.config
+
+let instrEval (controlSt, st, (s, i, o)) instruction = match instruction with
+  | BINOP op -> (match st with
+    | y :: x :: tail -> (controlSt, (Expr.to_func op x y) :: tail, (s, i, o))
+    | _              -> failwith "Not enough elements in stack")
+  | CONST z  -> (controlSt, z :: st, (s, i, o))
+  | READ     -> (match i with
+    | z :: tail -> (controlSt, z :: st, (s, tail, o))
+    | _         -> failwith "Not enough elements in input")
+  | WRITE    -> (match st with
+    | z :: tail -> (controlSt, tail, (s, i, o @ [z]))
+    | _         -> failwith "Not enough elements in stack")
+  | LD x     -> (controlSt, (State.eval s x) :: st, (s, i, o))
+  | ST x     -> (match st with
+    | z :: tail -> (controlSt, tail, (State.update x z s, i, o))
+    | _         -> failwith "Not enough elements in stack")
+  | LABEL l  ->  (controlSt, st, (s, i, o))
 
 (* Stack machine interpreter
+
      val eval : env -> config -> prg -> config
+
    Takes an environment, a configuration and a program, and returns a configuration as a result. The
    environment is used to locate a label to jump to (via method env#labeled <label_name>)
-*)                         
-                      
-let rec eval env ((cstack, stack, ((st, i, o) as c)) as conf) = function
-| [] -> conf
-| insn :: prg' ->
-     (match insn with
-      | BINOP op -> let y::x::stack' = stack in eval env (cstack, Expr.to_func op x y :: stack', c) prg'
-      | READ     -> let z::i' = i     in eval env (cstack, z::stack, (st, i', o)) prg'
-      | WRITE    -> let z::stack' = stack in eval env (cstack, stack', (st, i, o @ [z])) prg'
-      | CONST i  -> eval env (cstack, i::stack, c) prg'
-      | LD x     -> eval env (cstack, State.eval st x :: stack, c) prg'
-      | ST x     -> let z::stack' = stack in eval env (cstack, stack', (State.update x z st, i, o)) prg'
-      | LABEL s  -> eval env conf prg'
-      | JMP name -> eval env conf (env#labeled name)
-      | CJMP (condition, name) -> eval env conf (if (checkConditionalJump condition (hd stack)) then (env#labeled name) else prg')
-      | CALL f -> eval env ((prg', st)::cstack, stack, c) (env#labeled f)
-      | BEGIN (args, locals) -> let resolvedArgumentsMapping, newStack = resolveArgumentsMapping [] args stack 
-        in eval env (cstack, newStack, (List.fold_left (fun s (x, v) -> State.update x v s) (State.enter st (args @ locals)) resolvedArgumentsMapping, i, o)) prg'
-      | END | RET _ -> (match cstack with
-        | (prg', st')::cstack' -> eval env (cstack', stack, (State.leave st st', i, o)) prg'
-        | [] -> conf)
-     )
+*)                                                  
+let rec eval env cfg p = 
+  match p with
+    | instr::tail -> (match instr with
+      | JMP l          -> eval env cfg (env#labeled l)
+      | CJMP (znz, l)  -> (let (controlSt, st, rem) = cfg in match znz with
+                            | "z"  -> (match st with
+                                      | z::st' -> if z <> 0 then (eval env (controlSt, st', rem) tail) else (eval env (controlSt, st', rem) (env#labeled l))
+                                      | []     -> failwith "CJMP with empty stack")
+                            | "nz" -> (match st with
+                                      | z::st' -> if z <> 0 then (eval env (controlSt, st', rem) (env#labeled l)) else (eval env (controlSt, st', rem) tail)
+                                      | []     -> failwith "CJMP with empty stack"))
+      | CALL (l, _, _) -> let (controlSt, st, (s, i, o)) = cfg in eval env ((tail, s) :: controlSt, st, (s, i, o)) (env#labeled l)
+      | RET _ | END    -> let (controlSt, st, (s, i, o)) = cfg in (match controlSt with
+                                                                    | (p', s')::cStTail -> let s'' = State.leave s s' in eval env (cStTail, st, (s'', i, o)) p'
+                                                                    | _                 -> cfg
+                                                                  )
+      | BEGIN (_, params, locals) -> let (controlSt, st, (s, i, o)) = cfg in
+                                  let s' = State.enter s (params @ locals) in 
+                                  let calcParams = List.map (fun p -> ST p) params in
+                                  let cfg' = eval env (controlSt, st, (s', i, o)) calcParams in
+                                  eval env cfg' tail
+      | _                      -> eval env (instrEval cfg instr) tail)
+    | []          -> cfg
+
 (* Top-level evaluation
+
      val run : prg -> int list -> int list
+
    Takes a program, an input stream, and returns an output stream this program calculates
 *)
 let run p i =
@@ -64,69 +88,69 @@ let run p i =
   in
   let m = make_map M.empty p in
   let (_, _, (_, _, o)) = eval (object method labeled l = M.find l m end) ([], [], (State.empty, i, [])) p in o
+
 (* Stack machine compiler
-     val compile : Language.Stmt.t -> prg
+
+     val compile : Language.t -> prg
+
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
+let labelGen = object 
+   val mutable freeLabel = 0
+   method get = freeLabel <- freeLabel + 1; "L" ^ string_of_int freeLabel
+end
 
-class labels = 
-  object (self)
-    val counter = 0
-    method new_label = "label_" ^ string_of_int counter, {<counter = counter + 1>}
-  end 
-
-let funcLabel name = "L" ^ name
-
-let rec compileWithLabels labels =
+let rec compileWithLabels p lastL =
   let rec expr = function
   | Expr.Var   x          -> [LD x]
   | Expr.Const n          -> [CONST n]
   | Expr.Binop (op, x, y) -> expr x @ expr y @ [BINOP op]
-  | Expr.Call (f, args)   -> compileCall f args
-  and compileCall f args = let compiledArgsList = List.map expr (List.rev args) in
-                                    let compiledArgs = List.concat compiledArgsList in
-                                    compiledArgs @ [CALL (funcLabel f)]
-  in
-  function
-  | Stmt.Seq (s1, s2)  -> 
-    let labels1, res1 = compileWithLabels labels s1 in
-    let labels2, res2 = compileWithLabels labels1 s2 in
-    labels2, res1 @ res2
-  | Stmt.Read x        -> labels, [READ; ST x]
-  | Stmt.Write e       -> labels, expr e @ [WRITE]
-  | Stmt.Assign (x, e) -> labels, expr e @ [ST x]
-  | Stmt.Skip          -> labels, []
-  | Stmt.If (condition, ifAction, elseAction) ->
-    let compiledCondition = expr condition in
-    let jumpElse, labels1 = labels#new_label in
-    let jumpEndIf, labels2 = labels1#new_label in
-    let labels3, compiledIf = compileWithLabels labels2 ifAction in
-    let labels4, compiledElse = compileWithLabels labels3 elseAction in
-    labels4, compiledCondition @ [CJMP ("z", jumpElse)] @ compiledIf @ [JMP jumpEndIf] @ [LABEL jumpElse] @ compiledElse @ [LABEL jumpEndIf]
-  | Stmt.While (condition, loopAction) ->
-    let compiledCondition = expr condition in
-    let labelBegin, labels1 = labels#new_label in
-    let labelEnd, labels2 = labels1#new_label in
-    let labels3, compiledLoopAction = compileWithLabels labels2 loopAction in
-    labels3, [LABEL labelBegin] @ compiledCondition @ [CJMP ("z", labelEnd)] @ compiledLoopAction @ [JMP labelBegin] @ [LABEL labelEnd] 
-  | Stmt.Repeat (loopAction, condition) ->
-    let compiledCondition = expr condition in
-    let labelBegin, labels1 = labels#new_label in
-    let labels2, compiledLoopAction = compileWithLabels labels1 loopAction in
-    labels2, [LABEL labelBegin] @ compiledLoopAction @ compiledCondition @ [CJMP ("z", labelBegin)]
-  | Stmt.Call (f, args) -> labels, compileCall f args
-  | Stmt.Return res -> labels, (match res with None -> [] | Some v -> expr v) @ [END]
+  | Expr.Call (fName, argsE) -> let compiledArgs = List.flatten (List.map (expr) (List.rev argsE)) in
+                                compiledArgs @ [CALL (fName, List.length argsE, true)]
+  in match p with
+  | Stmt.Seq (s1, s2)  -> (let newLabel = labelGen#get in
+                           let (compiled1, used1) = compileWithLabels s1 newLabel in
+                           let (compiled2, used2) = compileWithLabels s2 lastL in
+                           (compiled1 @ (if used1 then [LABEL newLabel] else []) @ compiled2), used2)
+  | Stmt.Read x        -> [READ; ST x], false
+  | Stmt.Write e       -> (expr e @ [WRITE]), false
+  | Stmt.Assign (x, e) -> (expr e @ [ST x]), false
+  | Stmt.If (e, s1, s2) ->
+    let lElse = labelGen#get in
+    let (compiledS1, used1) = compileWithLabels s1 lastL in
+    let (compiledS2, used2) = compileWithLabels s2 lastL in 
+    (expr e @ [CJMP ("z", lElse)] 
+    @ compiledS1 @ (if used1 then [] else [JMP lastL]) @ [LABEL lElse]
+    @ compiledS2 @ (if used2 then [] else [JMP lastL])), true
+  | Stmt.While (e, body) ->
+    let lCheck = labelGen#get in
+    let lLoop = labelGen#get in
+    let (doBody, _) = compileWithLabels body lCheck in
+    ([JMP lCheck; LABEL lLoop] @ doBody @ [LABEL lCheck] @ expr e @ [CJMP ("nz", lLoop)]), false
+  | Stmt.Repeat (body, e) ->
+    let lLoop = labelGen#get in
+    let (repeatBody, _) = compileWithLabels body lastL in
+    ([LABEL lLoop] @ repeatBody @ expr e @ [CJMP ("z", lLoop)]), false
+  | Stmt.Skip -> [], false
+  | Stmt.Call (fName, argsE) -> let compiledArgs = List.flatten (List.map (expr) (List.rev argsE)) in
+                                compiledArgs @ [CALL (fName, List.length argsE, false)], false
+  | Stmt.Return e -> (match e with
+                       | Some x -> (expr x) @ [RET true]
+                       | None   -> [RET false]), false
 
-let compileFuncDefinition labels (name, (args, locals, body)) = let endLabel, labels1 = labels#new_label in
-  let labels2, compiledFunction = compileWithLabels labels1 body in
-  labels2, [LABEL name; BEGIN (args, locals)] @ compiledFunction @ [LABEL endLabel; END]
+let compileP p =
+  let label = labelGen#get in
+  let compiled, used = compileWithLabels p label in
+  compiled @ (if used then [LABEL label] else [])
 
-let compileAllFuncDefinitions labels defs = 
-  List.fold_left (fun (labels, allDefsCode) (name, others) -> let labels1, singleCode = compileFuncDefinition labels (funcLabel name, others) in labels1, singleCode::allDefsCode)
-    (labels, []) defs
+let compileDefs defs =
+  let compileDef (name, (params, locals, body)) = 
+    (let compiledBody = compileP body in
+    [LABEL name; BEGIN (name, params, locals)] @ compiledBody @ [END]) in
+  List.flatten (List.map compileDef defs)
 
-let compile (defs, p) = let endLabel, labels = (new labels)#new_label in
-  let labels1, compiledProgram = compileWithLabels labels p in 
-  let labels2, allFuncDefinitions = compileAllFuncDefinitions labels1 defs in
-  (LABEL "main" :: compiledProgram @ [LABEL endLabel]) @ [END] @ (List.concat allFuncDefinitions)
+let rec compile (defs, main) =
+  let compiledMain = compileP main in
+  let compiledDefs = compileDefs defs in
+  compiledMain @ [END] @ compiledDefs
