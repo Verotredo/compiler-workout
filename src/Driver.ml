@@ -47,6 +47,4 @@ let main =
 	List.iter (fun i -> Printf.printf "%d\n" i) output
     | `Fail er -> Printf.eprintf "Syntax error: %s\n" er
   with Invalid_argument _ ->
-
     Printf.printf "Usage: rc [-i | -s] <input file.expr>\n"
-
