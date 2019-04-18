@@ -40,12 +40,9 @@ type instr =
 (* pops from the hardware stack to the operand          *) | Pop   of opnd
 (* call a function by a name                            *) | Call  of string
 (* returns from a function                              *) | Ret
-<<<<<<< HEAD
-=======
 (* a label in the code                                  *) | Label of string
 (* a conditional jump                                   *) | CJmp  of string * string
 (* a non-conditional jump                               *) | Jmp   of string
->>>>>>> upstream/hw5
 
 (* Instruction printer *)
 let show instr =
@@ -75,12 +72,9 @@ let show instr =
   | Pop    s           -> Printf.sprintf "\tpopl\t%s"      (opnd s)
   | Ret                -> "\tret"
   | Call   p           -> Printf.sprintf "\tcall\t%s" p
-<<<<<<< HEAD
-=======
   | Label  l           -> Printf.sprintf "%s:\n" l
   | Jmp    l           -> Printf.sprintf "\tjmp\t%s" l
   | CJmp  (s , l)      -> Printf.sprintf "\tj%s\t%s" s l
->>>>>>> upstream/hw5
 
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
@@ -92,68 +86,65 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-<<<<<<< HEAD
-let rec compile env scode = match scode with
-| [] -> env, []
-| instr :: scode' ->
-  let env, asm =
-    match instr with
-    | CONST n ->
-      let s, env = env#allocate in
-      env, [Mov(L n, s)]
-    | READ ->
-      let s, env = env#allocate in
-      env, [Call "Lread"; Mov (eax, s)]
-    | WRITE ->
-      let s, env = env#pop in
-      env, [Push s; Call "Lwrite"; Pop eax]
-    | LD x ->
-      let s, env = (env#global x)#allocate in
-      env, [Mov(M (env#loc x), s)]
-    | ST x ->
-      let s, env = (env#global x)#pop in
-      env, [Mov(s, M (env#loc x))]
-    | BINOP op -> 
-      let rhs, lhs, env = env#pop2 in
-      let cmp suff = env#push lhs, [Mov(L 0, eax);
-                                    Binop ("cmp", rhs, lhs);
-                                    Set(suff, "%al");
-                                    Mov(eax, lhs)]
-      in
-      let logical op = env#push lhs, [Mov(L 0, eax);
-                                      Mov(L 0, edx);
-                                      Binop("cmp", L 0, lhs);
-                                      Set("ne", "%al");
-                                      Binop("cmp", L 0, rhs);
-                                      Set("ne", "%dl");
-                                      Binop(op, eax, edx);
-                                      Mov(edx, lhs)]
-      in
-      match op with
-      | "+" -> env#push lhs, [Binop ("+", rhs, lhs)]
-      | "-" -> env#push lhs, [Binop ("-", rhs, lhs)]
-      | "*" -> env#push lhs, [Binop ("*", rhs, lhs)]
-      | "/" ->
+
+let cmpOpToAsm op = match op with
+  | "<"  -> "l"
+  | "<=" -> "le"
+  | ">"  -> "g"
+  | ">=" -> "ge"
+  | "==" -> "e"
+  | "!=" -> "ne"
+
+let rec compile env = function
+  | []             -> env, []
+  | instr :: code' ->
+    let env, asm = 
+      match instr with
+      | CONST n  -> 
         let s, env = env#allocate in
-        env, [Mov (lhs, eax); Cltd; IDiv rhs; Mov(eax, s)]
-      | "%" ->
+        env, [Mov (L n, s)]
+      | READ     ->
         let s, env = env#allocate in
-        env, [Mov (lhs, eax); Cltd; IDiv rhs; Mov(edx, s)]
-      | "<" ->  cmp "l"
-      | ">" ->  cmp "g"
-      | "<=" -> cmp "le"
-      | ">=" -> cmp "ge"
-      | "==" -> cmp "e"
-      | "!=" -> cmp "ne"
-      | "&&" -> logical "&&"
-      | "!!" -> logical "!!"
-      | _ -> failwith (Printf.sprintf "Unsupported binary operator %s" op)
-  in
-  let env, asm' = compile env scode' in
-  env, asm @ asm'   
-=======
-let compile env code = failwith "Not yet implemented"
->>>>>>> upstream/hw5
+        env, [Call "Lread"; Mov (eax, s)]
+      | WRITE    ->
+        let s, env = env#pop in
+        env, [Push s; Call "Lwrite"; Pop eax]
+      | LD x     ->
+        let s, env = (env#global x)#allocate in
+        env, [Mov (M ("global_" ^ x), eax); Mov (eax, s)]
+      | ST x     ->
+        let s, env = (env#global x)#pop in
+        env, [Mov (s, eax); Mov (eax, M ("global_" ^ x))]
+      | BINOP op -> (
+        let y, x, env = env#pop2 in
+        let s, env = env#allocate in
+        match op with
+        | "+" | "-" | "*" -> env, [Mov (x, eax); Binop (op, y, eax); Mov (eax, s)]
+        | "/"             -> env, [Mov (x, eax); Cltd; IDiv y; Mov (eax, s)]
+        | "%"             -> env, [Mov (x, eax); Cltd; IDiv y; Mov (edx, s)]
+        | "<" | "<=" | ">" | ">=" | "==" | "!=" -> env, [
+                                                     Mov (x, edx);
+                                                     Binop ("^", eax, eax); 
+                                                     Binop ("cmp", y, edx);
+                                                     Set (cmpOpToAsm op, "%al");
+                                                     Mov (eax, s) 
+                                                   ]
+        | "!!" | "&&" -> env, [
+                           Binop ("^", eax, eax);
+                           Binop ("^", edx, edx);
+                           Binop ("cmp", L 0, x);
+                           Set ("ne", "%al");
+                           Binop ("cmp", L 0, y);
+                           Set ("ne", "%dl");
+                           Binop (op, eax, edx);
+                           Mov (edx, s)
+                         ])
+      | LABEL l  -> env, [Label l]
+      | JMP l    -> env, [Jmp l]
+      | CJMP (znz, l) -> let h, env = env#pop in env, [Binop ("cmp", L 0, h); CJmp (znz, l)]
+    in
+    let env, asm' = compile env code' in
+    env, asm @ asm'
 
 (* A set of strings *)           
 module S = Set.Make (String)
@@ -175,10 +166,7 @@ class env =
 	| []                            -> ebx     , 0
 	| (S n)::_                      -> S (n+1) , n+1
 	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
-<<<<<<< HEAD
-=======
         | (M _)::s                      -> allocate' s
->>>>>>> upstream/hw5
 	| _                             -> S 0     , 1
 	in
 	allocate' stack
@@ -189,11 +177,7 @@ class env =
     method push y = {< stack = y::stack >}
 
     (* pops one operand from the symbolic stack *)
-<<<<<<< HEAD
-    method pop  = let x::stack'    = stack in x,    {< stack = stack' >}
-=======
     method pop  = let x::stack' = stack in x, {< stack = stack' >}
->>>>>>> upstream/hw5
 
     (* pops two operands from the symbolic stack *)
     method pop2 = let x::y::stack' = stack in x, y, {< stack = stack' >}
@@ -208,11 +192,7 @@ class env =
     method globals = S.elements globals
   end
 
-<<<<<<< HEAD
-(* compiles a unit: generates x86 machine code for the stack program and surrounds it
-=======
 (* Compiles a unit: generates x86 machine code for the stack program and surrounds it
->>>>>>> upstream/hw5
    with function prologue/epilogue
 *)
 let compile_unit env scode =  
